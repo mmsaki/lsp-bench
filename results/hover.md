@@ -8,25 +8,25 @@ Waits for valid publishDiagnostics before sending requests.
 | Server | p50 | p95 | mean |
 |--------|-----|-----|------|
 | Our LSP | - | - | - |
-| solc --lsp | - | - | - |
-| Hardhat/Nomic | FAIL | FAIL | FAIL |
+| solc | - | - | - |
+| nomicfoundation | FAIL | FAIL | FAIL |
 
 ### Responses
 
-**Our LSP**  [diag: 4 in 445ms]
+**Our LSP**  [diag: 4 in 420ms]
 ```
 error: Method not found
 ```
 
-**solc --lsp**  [diag: 1 in 134ms]
+**solc**  [diag: 1 in 131ms]
 ```
 null
 ```
 
-**Hardhat/Nomic**
+**nomicfoundation**
 ```
 FAIL: wait_for_diagnostics: timeout
 ```
 
 
-Our LSP error: Method not found, solc --lsp null, Hardhat timeout.
+Our LSP error: Method not found, solc null, nomicfoundation timeout.

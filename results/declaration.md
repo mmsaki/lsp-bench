@@ -7,26 +7,26 @@ Waits for valid publishDiagnostics before sending requests.
 
 | Server | p50 | p95 | mean |
 |--------|-----|-----|------|
-| Our LSP | 8.9 ⚡ | 9.6 ⚡ | 8.9 ⚡ |
-| solc --lsp | - | - | - |
-| Hardhat/Nomic | FAIL | FAIL | FAIL |
+| Our LSP | 8.3 ⚡ | 9.3 ⚡ | 8.4 ⚡ |
+| solc | - | - | - |
+| nomicfoundation | FAIL | FAIL | FAIL |
 
 ### Responses
 
-**Our LSP**  [diag: 4 in 439ms]
+**Our LSP**  [diag: 4 in 424ms]
 ```json
 {"range":{"end":{"character":8,"line":9},"start":{"character":8,"line":9}},"uri":"file:///Users/meek/developer/mmsaki/so...
 ```
 
-**solc --lsp**  [diag: 1 in 133ms]
+**solc**  [diag: 1 in 132ms]
 ```
 error: Unknown method textDocument/declaration
 ```
 
-**Hardhat/Nomic**
+**nomicfoundation**
 ```
 FAIL: wait_for_diagnostics: timeout
 ```
 
 
-Our LSP {"range":{"end":{"character":8,"line":9},"start":{"character":8,"line":9}},"uri":"file:///Users/meek/developer/mmsaki/so..., solc --lsp error: Unknown method textDocument/declaration, Hardhat timeout.
+Our LSP {"range":{"end":{"character":8,"line":9},"start":{"character":8,"line":9}},"uri":"file:///Users/meek/developer/mmsaki/so..., solc error: Unknown method textDocument/declaration, nomicfoundation timeout.

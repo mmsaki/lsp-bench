@@ -375,12 +375,12 @@ const SERVERS: &[Server] = &[
         args: &[],
     },
     Server {
-        label: "solc --lsp",
+        label: "solc",
         cmd: "solc",
         args: &["--lsp"],
     },
     Server {
-        label: "Hardhat/Nomic",
+        label: "nomicfoundation",
         cmd: "nomicfoundation-solidity-language-server",
         args: &["--stdio"],
     },
@@ -602,7 +602,7 @@ fn generate_summary(name: &str, results: &[(String, f64, f64, f64, String)]) -> 
         "definition" => {
             let solc = results
                 .iter()
-                .find(|(n, _, _, _, _)| n == "solc --lsp")
+                .find(|(n, _, _, _, _)| n == "solc")
                 .map(|(_, _, _, _, s)| s.as_str())
                 .unwrap_or("");
             let sls = results
@@ -611,14 +611,14 @@ fn generate_summary(name: &str, results: &[(String, f64, f64, f64, String)]) -> 
                 .map(|(_, _, _, _, s)| s.as_str())
                 .unwrap_or("");
             format!(
-                "{} returns {}, {} {}, Hardhat timeout.",
-                "solc --lsp", solc, "Our LSP", sls
+                "{} returns {}, {} {}, nomicfoundation timeout.",
+                "solc", solc, "Our LSP", sls
             )
         }
         "declaration" => {
             let solc = results
                 .iter()
-                .find(|(n, _, _, _, _)| n == "solc --lsp")
+                .find(|(n, _, _, _, _)| n == "solc")
                 .map(|(_, _, _, _, s)| s.as_str())
                 .unwrap_or("");
             let sls = results
@@ -627,14 +627,14 @@ fn generate_summary(name: &str, results: &[(String, f64, f64, f64, String)]) -> 
                 .map(|(_, _, _, _, s)| s.as_str())
                 .unwrap_or("");
             format!(
-                "{} {}, {} {}, Hardhat timeout.",
-                "Our LSP", sls, "solc --lsp", solc
+                "{} {}, {} {}, nomicfoundation timeout.",
+                "Our LSP", sls, "solc", solc
             )
         }
         "hover" => {
             let solc = results
                 .iter()
-                .find(|(n, _, _, _, _)| n == "solc --lsp")
+                .find(|(n, _, _, _, _)| n == "solc")
                 .map(|(_, _, _, _, s)| s.as_str())
                 .unwrap_or("");
             let sls = results
@@ -643,14 +643,14 @@ fn generate_summary(name: &str, results: &[(String, f64, f64, f64, String)]) -> 
                 .map(|(_, _, _, _, s)| s.as_str())
                 .unwrap_or("");
             format!(
-                "{} {}, {} {}, Hardhat timeout.",
-                "Our LSP", sls, "solc --lsp", solc
+                "{} {}, {} {}, nomicfoundation timeout.",
+                "Our LSP", sls, "solc", solc
             )
         }
         "references" => {
             let solc = results
                 .iter()
-                .find(|(n, _, _, _, _)| n == "solc --lsp")
+                .find(|(n, _, _, _, _)| n == "solc")
                 .map(|(_, _, _, _, s)| s.as_str())
                 .unwrap_or("");
             let sls = results
@@ -659,8 +659,8 @@ fn generate_summary(name: &str, results: &[(String, f64, f64, f64, String)]) -> 
                 .map(|(_, _, _, _, s)| s.as_str())
                 .unwrap_or("");
             format!(
-                "{} {}, {} {}, Hardhat timeout.",
-                "Our LSP", sls, "solc --lsp", solc
+                "{} {}, {} {}, nomicfoundation timeout.",
+                "Our LSP", sls, "solc", solc
             )
         }
         "documentSymbol" => {
@@ -670,7 +670,7 @@ fn generate_summary(name: &str, results: &[(String, f64, f64, f64, String)]) -> 
                 .collect::<Vec<_>>();
             if let Some((_, _, _, mean, _)) = valid.iter().find(|(n, _, _, _, _)| n == "Our LSP") {
                 format!(
-                    "{} fast ({:.1}ms) returns symbols, solc unsupported, Hardhat timeout.",
+                    "{} fast ({:.1}ms) returns symbols, solc unsupported, nomicfoundation timeout.",
                     "Our LSP", *mean
                 )
             } else {

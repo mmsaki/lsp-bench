@@ -5,12 +5,12 @@ Benchmarks comparing Solidity LSP servers against Uniswap V4-core (`Pool.sol`, 6
 ## Servers
 
 - **Our LSP** — [solidity-language-server](https://github.com/mmsaki/solidity-language-server) (Rust)
-- **solc --lsp** — Solidity compiler built-in LSP (C++)
-- **Hardhat/Nomic** — nomicfoundation-solidity-language-server (Node.js)
+- **solc** — Solidity compiler built-in LSP (C++)
+- **nomicfoundation** — nomicfoundation-solidity-language-server (Node.js)
 
 ## Results
 
-| Benchmark | Our LSP | solc --lsp | Hardhat/Nomic |
+| Benchmark | Our LSP | solc | nomicfoundation |
 |-----------|---------|------------|---------------|
 | Spawn + Init | 3ms ⚡ | 123ms | 867ms |
 | Diagnostics | 435ms | 133ms ⚡ | 911ms |

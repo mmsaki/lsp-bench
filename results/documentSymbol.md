@@ -6,26 +6,26 @@ Waits for valid publishDiagnostics before sending requests.
 
 | Server | p50 | p95 | mean |
 |--------|-----|-----|------|
-| Our LSP | 8.6 ⚡ | 8.8 ⚡ | 8.6 ⚡ |
-| solc --lsp | - | - | - |
-| Hardhat/Nomic | FAIL | FAIL | FAIL |
+| Our LSP | 8.4 ⚡ | 8.6 ⚡ | 8.3 ⚡ |
+| solc | - | - | - |
+| nomicfoundation | FAIL | FAIL | FAIL |
 
 ### Responses
 
-**Our LSP**  [diag: 4 in 436ms]
+**Our LSP**  [diag: 4 in 424ms]
 ```json
 [{"kind":15,"name":"solidity ^0.8.0","range":{"end":{"character":23,"line":1},"start":{"character":0,"line":1}},"selecti...
 ```
 
-**solc --lsp**  [diag: 1 in 130ms]
+**solc**  [diag: 1 in 130ms]
 ```
 error: Unknown method textDocument/documentSymbol
 ```
 
-**Hardhat/Nomic**
+**nomicfoundation**
 ```
 FAIL: wait_for_diagnostics: timeout
 ```
 
 
-Our LSP fast (8.6ms) returns symbols, solc unsupported, Hardhat timeout.
+Our LSP fast (8.3ms) returns symbols, solc unsupported, nomicfoundation timeout.

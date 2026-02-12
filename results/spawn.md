@@ -5,9 +5,9 @@ No files opened.
 
 | Server | p50 | p95 | mean |
 |--------|-----|-----|------|
-| Our LSP | 3.4 ⚡ | 3.9 ⚡ | 3.4 ⚡ |
-| solc --lsp | 124.1 | 131.0 | 124.8 |
-| Hardhat/Nomic | 871.6 | 881.5 | 863.3 |
+| Our LSP | 5.0 ⚡ | 5.4 ⚡ | 4.7 ⚡ |
+| solc | 121.6 | 124.0 | 121.7 |
+| nomicfoundation | 882.0 | 891.9 | 878.9 |
 
 ### Responses
 
@@ -16,15 +16,15 @@ No files opened.
 "ok"
 ```
 
-**solc --lsp**
+**solc**
 ```json
 "ok"
 ```
 
-**Hardhat/Nomic**
+**nomicfoundation**
 ```json
 "ok"
 ```
 
 
-Our LSP fastest startup (3ms), solc --lsp 125ms, Hardhat/Nomic 863ms.
+Our LSP fastest startup (5ms), solc 122ms, nomicfoundation 879ms.
