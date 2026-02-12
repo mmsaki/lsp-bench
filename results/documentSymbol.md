@@ -6,18 +6,20 @@ Waits for valid publishDiagnostics before sending requests.
 
 | Server | p50 | p95 | mean |
 |--------|-----|-----|------|
-| Our LSP | 8.4 ⚡ | 8.6 ⚡ | 8.3 ⚡ |
+| Our LSP | 21.1 ⚡ | 35.8 ⚡ | 22.2 ⚡ |
 | solc | - | - | - |
 | nomicfoundation | FAIL | FAIL | FAIL |
+| juanfranblanco | FAIL | FAIL | FAIL |
+| qiuxiang | FAIL | FAIL | FAIL |
 
 ### Responses
 
-**Our LSP**  [diag: 4 in 424ms]
+**Our LSP**  [diag: 4 in 420ms]
 ```json
 [{"kind":15,"name":"solidity ^0.8.0","range":{"end":{"character":23,"line":1},"start":{"character":0,"line":1}},"selecti...
 ```
 
-**solc**  [diag: 1 in 130ms]
+**solc**  [diag: 1 in 139ms]
 ```
 error: Unknown method textDocument/documentSymbol
 ```
@@ -27,5 +29,15 @@ error: Unknown method textDocument/documentSymbol
 FAIL: wait_for_diagnostics: timeout
 ```
 
+**juanfranblanco**
+```
+FAIL: wait_for_diagnostics: EOF
+```
 
-Our LSP fast (8.3ms) returns symbols, solc unsupported, nomicfoundation timeout.
+**qiuxiang**
+```
+FAIL: wait_for_diagnostics: timeout
+```
+
+
+Our LSP 22.2ms, solc unsupported, nomicfoundation timeout, juanfranblanco timeout, qiuxiang timeout.
