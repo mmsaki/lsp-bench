@@ -10,15 +10,17 @@ Waits for valid publishDiagnostics before sending requests.
 | Our LSP | - | - | - |
 | solc | - | - | - |
 | nomicfoundation | FAIL | FAIL | FAIL |
+| juanfranblanco | FAIL | FAIL | FAIL |
+| qiuxiang | FAIL | FAIL | FAIL |
 
 ### Responses
 
-**Our LSP**  [diag: 4 in 420ms]
+**Our LSP**  [diag: 4 in 414ms]
 ```
 error: Method not found
 ```
 
-**solc**  [diag: 1 in 131ms]
+**solc**  [diag: 1 in 194ms]
 ```
 null
 ```
@@ -28,5 +30,15 @@ null
 FAIL: wait_for_diagnostics: timeout
 ```
 
+**juanfranblanco**
+```
+FAIL: wait_for_diagnostics: EOF
+```
 
-Our LSP error: Method not found, solc null, nomicfoundation timeout.
+**qiuxiang**
+```
+FAIL: wait_for_diagnostics: timeout
+```
+
+
+Our LSP error: Method not found, solc null, nomicfoundation timeout, juanfranblanco timeout, qiuxiang timeout.

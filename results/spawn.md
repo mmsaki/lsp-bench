@@ -5,9 +5,11 @@ No files opened.
 
 | Server | p50 | p95 | mean |
 |--------|-----|-----|------|
-| Our LSP | 5.0 ⚡ | 5.4 ⚡ | 4.7 ⚡ |
-| solc | 121.6 | 124.0 | 121.7 |
-| nomicfoundation | 882.0 | 891.9 | 878.9 |
+| Our LSP | 4.0 ⚡ | 5.3 ⚡ | 4.1 ⚡ |
+| solc | 123.0 | 125.4 | 122.5 |
+| nomicfoundation | 861.2 | 886.8 | 860.6 |
+| juanfranblanco | 509.5 | 513.8 | 510.2 |
+| qiuxiang | 67.3 | 68.4 | 67.4 |
 
 ### Responses
 
@@ -26,5 +28,15 @@ No files opened.
 "ok"
 ```
 
+**juanfranblanco**
+```json
+"ok"
+```
 
-Our LSP fastest startup (5ms), solc 122ms, nomicfoundation 879ms.
+**qiuxiang**
+```json
+"ok"
+```
+
+
+Our LSP fastest startup (4ms), qiuxiang 67ms, solc 123ms, juanfranblanco 510ms, nomicfoundation 861ms.

@@ -7,18 +7,20 @@ Waits for valid publishDiagnostics before sending requests.
 
 | Server | p50 | p95 | mean |
 |--------|-----|-----|------|
-| Our LSP | 8.3 ⚡ | 9.3 ⚡ | 8.4 ⚡ |
+| Our LSP | 27.5 ⚡ | 77.2 ⚡ | 31.0 ⚡ |
 | solc | - | - | - |
 | nomicfoundation | FAIL | FAIL | FAIL |
+| juanfranblanco | FAIL | FAIL | FAIL |
+| qiuxiang | FAIL | FAIL | FAIL |
 
 ### Responses
 
-**Our LSP**  [diag: 4 in 424ms]
+**Our LSP**  [diag: 4 in 425ms]
 ```json
 {"range":{"end":{"character":8,"line":9},"start":{"character":8,"line":9}},"uri":"file:///Users/meek/developer/mmsaki/so...
 ```
 
-**solc**  [diag: 1 in 132ms]
+**solc**  [diag: 1 in 138ms]
 ```
 error: Unknown method textDocument/declaration
 ```
@@ -28,5 +30,15 @@ error: Unknown method textDocument/declaration
 FAIL: wait_for_diagnostics: timeout
 ```
 
+**juanfranblanco**
+```
+FAIL: wait_for_diagnostics: EOF
+```
 
-Our LSP {"range":{"end":{"character":8,"line":9},"start":{"character":8,"line":9}},"uri":"file:///Users/meek/developer/mmsaki/so..., solc error: Unknown method textDocument/declaration, nomicfoundation timeout.
+**qiuxiang**
+```
+FAIL: wait_for_diagnostics: timeout
+```
+
+
+Our LSP 31.0ms, solc unsupported, nomicfoundation timeout, juanfranblanco timeout, qiuxiang timeout.

@@ -384,6 +384,16 @@ const SERVERS: &[Server] = &[
         cmd: "nomicfoundation-solidity-language-server",
         args: &["--stdio"],
     },
+    Server {
+        label: "juanfranblanco",
+        cmd: "vscode-solidity-server",
+        args: &["--stdio"],
+    },
+    Server {
+        label: "qiuxiang",
+        cmd: "solidity-ls",
+        args: &["--stdio"],
+    },
 ];
 
 // ── Bench result per server ─────────────────────────────────────────────────
@@ -404,7 +414,25 @@ enum BenchResult {
     Fail(String),
 }
 
-fn run_bench<F>(name: &str, header: &[String], servers: &[&Server], root: &str, cwd: &Path, f: F)
+struct BenchRow {
+    label: String,
+    #[allow(dead_code)]
+    p50: f64,
+    #[allow(dead_code)]
+    p95: f64,
+    mean: f64,
+    kind: u8, // 0=ok, 1=invalid, 2=fail
+    fail_msg: String,
+}
+
+fn run_bench<F>(
+    name: &str,
+    header: &[String],
+    servers: &[&Server],
+    root: &str,
+    cwd: &Path,
+    f: F,
+) -> Vec<BenchRow>
 where
     F: Fn(&Server, &str, &Path) -> BenchResult,
 {
@@ -412,7 +440,6 @@ where
     lines.push("| Server | p50 | p95 | mean |".to_string());
     lines.push("|--------|-----|-----|------|".to_string());
 
-    // Collect all results first so we can find the winner
     struct Row {
         label: String,
         p50: f64,
@@ -420,7 +447,7 @@ where
         mean: f64,
         summary: String,
         diag_suffix: String,
-        kind: u8, // 0=ok, 1=invalid, 2=fail
+        kind: u8,
         fail_msg: String,
     }
 
@@ -556,146 +583,186 @@ where
     std::fs::write(&path, &out).unwrap();
     println!("{}", out);
     eprintln!("  -> {}", path);
+
+    // Return rows for summary generation
+    rows.iter()
+        .map(|r| BenchRow {
+            label: r.label.clone(),
+            p50: r.p50,
+            p95: r.p95,
+            mean: r.mean,
+            kind: r.kind,
+            fail_msg: r.fail_msg.clone(),
+        })
+        .collect()
 }
 
 fn generate_summary(name: &str, results: &[(String, f64, f64, f64, String)]) -> String {
+    // Build a ranked list: servers with valid (>0) mean first, sorted by mean,
+    // then failed/timeout servers appended with their summary text.
+    let mut valid: Vec<&(String, f64, f64, f64, String)> =
+        results.iter().filter(|(_, _, _, m, _)| *m > 0.0).collect();
+    valid.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap());
+
+    let failed: Vec<&(String, f64, f64, f64, String)> =
+        results.iter().filter(|(_, _, _, m, _)| *m == 0.0).collect();
+
     match name {
-        "spawn" => {
-            let mut valid = results
-                .iter()
-                .filter(|(_, _, _, m, _)| *m > 0.0)
-                .collect::<Vec<_>>();
-            valid.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap());
-            if valid.len() >= 1 {
-                format!(
-                    "{} fastest startup ({:.0}ms), {} {:.0}ms, {} {:.0}ms.",
-                    valid[0].0,
-                    valid[0].3,
-                    valid.get(1).map(|r| r.0.as_str()).unwrap_or(""),
-                    valid.get(1).map(|r| r.3).unwrap_or(0.0),
-                    valid.get(2).map(|r| r.0.as_str()).unwrap_or(""),
-                    valid.get(2).map(|r| r.3).unwrap_or(0.0)
-                )
+        "spawn" | "diagnostics" => {
+            if valid.is_empty() {
+                return "No valid results.".to_string();
+            }
+            let mut parts: Vec<String> = Vec::new();
+            let qualifier = if name == "spawn" {
+                "startup"
             } else {
+                "diagnostics"
+            };
+            for (i, r) in valid.iter().enumerate() {
+                if i == 0 {
+                    parts.push(format!("{} fastest {} ({:.0}ms)", r.0, qualifier, r.3));
+                } else {
+                    parts.push(format!("{} {:.0}ms", r.0, r.3));
+                }
+            }
+            for r in &failed {
+                parts.push(format!("{} {}", r.0, r.4));
+            }
+            format!("{}.", parts.join(", "))
+        }
+        _ => {
+            // Feature benchmarks (definition, declaration, hover, references, documentSymbol)
+            let mut parts: Vec<String> = Vec::new();
+            for r in &valid {
+                if r.3 > 0.0 {
+                    parts.push(format!("{} {:.1}ms", r.0, r.3));
+                }
+            }
+            for r in &failed {
+                let desc = if r.4 == "fail" || r.4.contains("timeout") {
+                    format!("{} timeout", r.0)
+                } else if r.4.contains("unsupported") || r.4.contains("Unknown method") {
+                    format!("{} unsupported", r.0)
+                } else if r.4.is_empty() || r.4 == "[]" {
+                    format!("{} no result", r.0)
+                } else {
+                    format!("{} {}", r.0, r.4)
+                };
+                parts.push(desc);
+            }
+            if parts.is_empty() {
                 "No valid results.".to_string()
+            } else {
+                format!("{}.", parts.join(", "))
             }
         }
-        "diagnostics" => {
-            let mut valid = results
-                .iter()
-                .filter(|(_, _, _, m, _)| *m > 0.0)
-                .collect::<Vec<_>>();
-            valid.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap());
-            if valid.len() >= 1 {
-                let sls_diag = results
-                    .iter()
-                    .find(|(n, _, _, _, _)| n == "Our LSP")
-                    .and_then(|(_, _, _, _, s)| {
-                        s.strip_prefix("4 diagnostics: ").map(|s| s.to_string())
-                    })
-                    .unwrap_or("".to_string());
-                format!("{} fastest diagnostics ({:.0}ms), {} {:.0}ms with {}, {} {:.0}ms with no diags.", valid[0].0, valid[0].3, valid.get(1).map(|r| r.0.as_str()).unwrap_or(""), valid.get(1).map(|r| r.3).unwrap_or(0.0), sls_diag, valid.get(2).map(|r| r.0.as_str()).unwrap_or(""), valid.get(2).map(|r| r.3).unwrap_or(0.0))
-            } else {
-                "No valid results.".to_string()
-            }
-        }
-        "definition" => {
-            let solc = results
-                .iter()
-                .find(|(n, _, _, _, _)| n == "solc")
-                .map(|(_, _, _, _, s)| s.as_str())
-                .unwrap_or("");
-            let sls = results
-                .iter()
-                .find(|(n, _, _, _, _)| n == "Our LSP")
-                .map(|(_, _, _, _, s)| s.as_str())
-                .unwrap_or("");
-            format!(
-                "{} returns {}, {} {}, nomicfoundation timeout.",
-                "solc", solc, "Our LSP", sls
-            )
-        }
-        "declaration" => {
-            let solc = results
-                .iter()
-                .find(|(n, _, _, _, _)| n == "solc")
-                .map(|(_, _, _, _, s)| s.as_str())
-                .unwrap_or("");
-            let sls = results
-                .iter()
-                .find(|(n, _, _, _, _)| n == "Our LSP")
-                .map(|(_, _, _, _, s)| s.as_str())
-                .unwrap_or("");
-            format!(
-                "{} {}, {} {}, nomicfoundation timeout.",
-                "Our LSP", sls, "solc", solc
-            )
-        }
-        "hover" => {
-            let solc = results
-                .iter()
-                .find(|(n, _, _, _, _)| n == "solc")
-                .map(|(_, _, _, _, s)| s.as_str())
-                .unwrap_or("");
-            let sls = results
-                .iter()
-                .find(|(n, _, _, _, _)| n == "Our LSP")
-                .map(|(_, _, _, _, s)| s.as_str())
-                .unwrap_or("");
-            format!(
-                "{} {}, {} {}, nomicfoundation timeout.",
-                "Our LSP", sls, "solc", solc
-            )
-        }
-        "references" => {
-            let solc = results
-                .iter()
-                .find(|(n, _, _, _, _)| n == "solc")
-                .map(|(_, _, _, _, s)| s.as_str())
-                .unwrap_or("");
-            let sls = results
-                .iter()
-                .find(|(n, _, _, _, _)| n == "Our LSP")
-                .map(|(_, _, _, _, s)| s.as_str())
-                .unwrap_or("");
-            format!(
-                "{} {}, {} {}, nomicfoundation timeout.",
-                "Our LSP", sls, "solc", solc
-            )
-        }
-        "documentSymbol" => {
-            let valid = results
-                .iter()
-                .filter(|(_, _, _, m, _)| *m > 0.0)
-                .collect::<Vec<_>>();
-            if let Some((_, _, _, mean, _)) = valid.iter().find(|(n, _, _, _, _)| n == "Our LSP") {
-                format!(
-                    "{} fast ({:.1}ms) returns symbols, solc unsupported, nomicfoundation timeout.",
-                    "Our LSP", *mean
-                )
-            } else {
-                "No valid results.".to_string()
-            }
-        }
-        _ => "".to_string(),
     }
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
+const ALL_BENCHMARKS: &[&str] = &[
+    "spawn",
+    "diagnostics",
+    "definition",
+    "declaration",
+    "hover",
+    "references",
+    "documentSymbol",
+];
+
+fn print_usage() {
+    eprintln!("Usage: bench [OPTIONS] <COMMAND>");
+    eprintln!();
+    eprintln!("Commands:");
+    eprintln!("  all            — run all benchmarks");
+    eprintln!("  spawn          — spawn + initialize handshake");
+    eprintln!("  diagnostics    — open Pool.sol, time to first diagnostic");
+    eprintln!("  definition     — go-to-definition on TickMath in Pool.sol");
+    eprintln!("  declaration    — go-to-declaration on TickMath in Pool.sol");
+    eprintln!("  hover          — hover on TickMath in Pool.sol");
+    eprintln!("  references     — find references on TickMath in Pool.sol");
+    eprintln!("  documentSymbol — get document symbols for Pool.sol");
+    eprintln!();
+    eprintln!("Options:");
+    eprintln!("  -n, --iterations <N>  Number of measured iterations (default: 10)");
+    eprintln!("  -w, --warmup <N>      Number of warmup iterations (default: 2)");
+    eprintln!("  -t, --timeout <SECS>  Timeout per request in seconds (default: 30)");
+    eprintln!("  -h, --help            Show this help message");
+    eprintln!();
+    eprintln!("Examples:");
+    eprintln!("  bench all                  Run all benchmarks (10 iterations, 2 warmup)");
+    eprintln!("  bench all -n 1 -w 0        Run all benchmarks once, no warmup");
+    eprintln!("  bench diagnostics -n 5     Run diagnostics with 5 iterations");
+    eprintln!("  bench all -t 10            Run all benchmarks with 10s timeout");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() < 2 {
-        eprintln!("Usage: bench <spawn|diagnostics|definition|declaration|hover|references|documentSymbol>");
-        eprintln!("  spawn        — spawn + initialize handshake");
-        eprintln!("  diagnostics  — open Pool.sol, time to first diagnostic");
-        eprintln!("  definition   — go-to-definition on TickMath in Pool.sol");
-        eprintln!("  declaration  — go-to-declaration on TickMath in Pool.sol");
-        eprintln!("  hover        — hover on TickMath in Pool.sol");
-        eprintln!("  references   — find references on TickMath in Pool.sol");
-        eprintln!("  documentSymbol — get document symbols for Pool.sol");
+    // Parse flags
+    let mut n: usize = 10;
+    let mut w: usize = 2;
+    let mut timeout_secs: u64 = 30;
+    let mut commands: Vec<String> = Vec::new();
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            "-n" | "--iterations" => {
+                i += 1;
+                n = args.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("Error: -n requires a number");
+                    std::process::exit(1);
+                });
+            }
+            "-w" | "--warmup" => {
+                i += 1;
+                w = args.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("Error: -w requires a number");
+                    std::process::exit(1);
+                });
+            }
+            "-t" | "--timeout" => {
+                i += 1;
+                timeout_secs = args.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("Error: -t requires a number (seconds)");
+                    std::process::exit(1);
+                });
+            }
+            other => {
+                commands.push(other.to_string());
+            }
+        }
+        i += 1;
+    }
+
+    let timeout = Duration::from_secs(timeout_secs);
+
+    if commands.is_empty() {
+        print_usage();
         std::process::exit(1);
+    }
+
+    // Expand "all" into every benchmark
+    let benchmarks: Vec<&str> = if commands.iter().any(|c| c == "all") {
+        ALL_BENCHMARKS.to_vec()
+    } else {
+        commands.iter().map(|s| s.as_str()).collect()
+    };
+
+    // Validate commands
+    for b in &benchmarks {
+        if !ALL_BENCHMARKS.contains(b) {
+            eprintln!("Error: unknown benchmark '{}'", b);
+            eprintln!();
+            print_usage();
+            std::process::exit(1);
+        }
     }
 
     let v4 = ["bench/v4-core", "v4-core"]
@@ -718,14 +785,13 @@ fn main() {
         })
         .collect();
 
-    let n = 10usize;
-    let w = 2usize;
-    let cmd = args[1].as_str();
+    let run_all = benchmarks.len() == ALL_BENCHMARKS.len();
+    let mut all_results: Vec<(&str, Vec<BenchRow>)> = Vec::new();
 
     // ── spawn ───────────────────────────────────────────────────────────────
 
-    if cmd == "spawn" {
-        run_bench(
+    if benchmarks.contains(&"spawn") {
+        let rows = run_bench(
             "spawn",
             &[
                 format!(
@@ -764,17 +830,18 @@ fn main() {
                 }
             },
         );
+        all_results.push(("Spawn + Init", rows));
     }
 
     // ── diagnostics ─────────────────────────────────────────────────────────
 
-    if cmd == "diagnostics" {
+    if benchmarks.contains(&"diagnostics") {
         let pool_sol = Path::new(v4).join("src/libraries/Pool.sol");
         let line_count = std::fs::read_to_string(&pool_sol)
             .map(|s| s.lines().count())
             .unwrap_or(0);
 
-        run_bench(
+        let rows = run_bench(
             "diagnostics",
             &[
                 format!(
@@ -790,7 +857,6 @@ fn main() {
             &root,
             Path::new(v4),
             |srv, root, cwd| {
-                let timeout = Duration::from_secs(30);
                 let mut samples = Vec::new();
                 let mut first: Option<Value> = None;
                 for i in 0..(w + n) {
@@ -864,11 +930,12 @@ fn main() {
                 }
             },
         );
+        all_results.push(("Diagnostics", rows));
     }
 
     // ── definition ──────────────────────────────────────────────────────────
 
-    if cmd == "definition" {
+    if benchmarks.contains(&"definition") {
         let pool_sol = Path::new(v4).join("src/libraries/Pool.sol");
         let line_count = std::fs::read_to_string(&pool_sol)
             .map(|s| s.lines().count())
@@ -876,7 +943,7 @@ fn main() {
         let target_line: u32 = 102;
         let target_col: u32 = 15;
 
-        run_bench(
+        let rows = run_bench(
             "definition",
             &[
                 format!(
@@ -898,7 +965,6 @@ fn main() {
             &root,
             Path::new(v4),
             |srv, root, cwd| {
-                let timeout = Duration::from_secs(30);
                 let mut c = match LspClient::spawn(srv.cmd, srv.args, cwd) {
                     Ok(c) => c,
                     Err(e) => return BenchResult::Fail(e),
@@ -911,7 +977,7 @@ fn main() {
                 }
 
                 // Wait for valid diagnostics (build complete)
-                let diag_info = match c.wait_for_valid_diagnostics(Duration::from_secs(10)) {
+                let diag_info = match c.wait_for_valid_diagnostics(timeout) {
                     Ok(info) => info,
                     Err(e) => return BenchResult::Fail(format!("wait_for_diagnostics: {}", e)),
                 };
@@ -970,11 +1036,12 @@ fn main() {
                 }
             },
         );
+        all_results.push(("Go to Definition", rows));
     }
 
     // ── declaration ─────────────────────────────────────────────────────────
 
-    if cmd == "declaration" {
+    if benchmarks.contains(&"declaration") {
         let pool_sol = Path::new(v4).join("src/libraries/Pool.sol");
         let line_count = std::fs::read_to_string(&pool_sol)
             .map(|s| s.lines().count())
@@ -982,7 +1049,7 @@ fn main() {
         let target_line: u32 = 102;
         let target_col: u32 = 15;
 
-        run_bench(
+        let rows = run_bench(
             "declaration",
             &[
                 format!(
@@ -1004,7 +1071,6 @@ fn main() {
             &root,
             Path::new(v4),
             |srv, root, cwd| {
-                let timeout = Duration::from_secs(30);
                 let mut c = match LspClient::spawn(srv.cmd, srv.args, cwd) {
                     Ok(c) => c,
                     Err(e) => return BenchResult::Fail(e),
@@ -1017,7 +1083,7 @@ fn main() {
                 }
 
                 // Wait for valid diagnostics (build complete)
-                let diag_info = match c.wait_for_valid_diagnostics(Duration::from_secs(10)) {
+                let diag_info = match c.wait_for_valid_diagnostics(timeout) {
                     Ok(info) => info,
                     Err(e) => return BenchResult::Fail(format!("wait_for_diagnostics: {}", e)),
                 };
@@ -1076,11 +1142,12 @@ fn main() {
                 }
             },
         );
+        all_results.push(("Go to Declaration", rows));
     }
 
     // ── hover ─────────────────────────────────────────────────────────
 
-    if cmd == "hover" {
+    if benchmarks.contains(&"hover") {
         let pool_sol = Path::new(v4).join("src/libraries/Pool.sol");
         let line_count = std::fs::read_to_string(&pool_sol)
             .map(|s| s.lines().count())
@@ -1088,7 +1155,7 @@ fn main() {
         let target_line: u32 = 102;
         let target_col: u32 = 15;
 
-        run_bench(
+        let rows = run_bench(
             "hover",
             &[
                 format!("## 5. HOVER (ms) — {} iterations, {} warmup", n, w),
@@ -1107,7 +1174,6 @@ fn main() {
             &root,
             Path::new(v4),
             |srv, root, cwd| {
-                let timeout = Duration::from_secs(30);
                 let mut c = match LspClient::spawn(srv.cmd, srv.args, cwd) {
                     Ok(c) => c,
                     Err(e) => return BenchResult::Fail(e),
@@ -1120,7 +1186,7 @@ fn main() {
                 }
 
                 // Wait for valid diagnostics (build complete)
-                let diag_info = match c.wait_for_valid_diagnostics(Duration::from_secs(10)) {
+                let diag_info = match c.wait_for_valid_diagnostics(timeout) {
                     Ok(info) => info,
                     Err(e) => return BenchResult::Fail(format!("wait_for_diagnostics: {}", e)),
                 };
@@ -1173,11 +1239,12 @@ fn main() {
                 }
             },
         );
+        all_results.push(("Hover", rows));
     }
 
     // ── references ─────────────────────────────────────────────────────────
 
-    if cmd == "references" {
+    if benchmarks.contains(&"references") {
         let pool_sol = Path::new(v4).join("src/libraries/Pool.sol");
         let line_count = std::fs::read_to_string(&pool_sol)
             .map(|s| s.lines().count())
@@ -1185,7 +1252,7 @@ fn main() {
         let target_line: u32 = 102;
         let target_col: u32 = 15;
 
-        run_bench(
+        let rows = run_bench(
             "references",
             &[
                 format!(
@@ -1207,7 +1274,6 @@ fn main() {
             &root,
             Path::new(v4),
             |srv, root, cwd| {
-                let timeout = Duration::from_secs(30);
                 let mut c = match LspClient::spawn(srv.cmd, srv.args, cwd) {
                     Ok(c) => c,
                     Err(e) => return BenchResult::Fail(e),
@@ -1220,7 +1286,7 @@ fn main() {
                 }
 
                 // Wait for valid diagnostics (build complete)
-                let diag_info = match c.wait_for_valid_diagnostics(Duration::from_secs(10)) {
+                let diag_info = match c.wait_for_valid_diagnostics(timeout) {
                     Ok(info) => info,
                     Err(e) => return BenchResult::Fail(format!("wait_for_diagnostics: {}", e)),
                 };
@@ -1274,17 +1340,18 @@ fn main() {
                 }
             },
         );
+        all_results.push(("Find References", rows));
     }
 
     // ── documentSymbol ─────────────────────────────────────────────────────────
 
-    if cmd == "documentSymbol" {
+    if benchmarks.contains(&"documentSymbol") {
         let pool_sol = Path::new(v4).join("src/libraries/Pool.sol");
         let line_count = std::fs::read_to_string(&pool_sol)
             .map(|s| s.lines().count())
             .unwrap_or(0);
 
-        run_bench(
+        let rows = run_bench(
             "documentSymbol",
             &[
                 format!(
@@ -1301,7 +1368,6 @@ fn main() {
             &root,
             Path::new(v4),
             |srv, root, cwd| {
-                let timeout = Duration::from_secs(30);
                 let mut c = match LspClient::spawn(srv.cmd, srv.args, cwd) {
                     Ok(c) => c,
                     Err(e) => return BenchResult::Fail(e),
@@ -1314,7 +1380,7 @@ fn main() {
                 }
 
                 // Wait for valid diagnostics (build complete)
-                let diag_info = match c.wait_for_valid_diagnostics(Duration::from_secs(10)) {
+                let diag_info = match c.wait_for_valid_diagnostics(timeout) {
                     Ok(info) => info,
                     Err(e) => return BenchResult::Fail(format!("wait_for_diagnostics: {}", e)),
                 };
@@ -1366,5 +1432,86 @@ fn main() {
                 }
             },
         );
+        all_results.push(("Document Symbols", rows));
+    }
+
+    // ── Generate results/README.md summary ──────────────────────────────────
+
+    if run_all && !all_results.is_empty() {
+        // Collect server labels from the first benchmark's rows
+        let server_labels: Vec<&str> = all_results[0].1.iter().map(|r| r.label.as_str()).collect();
+
+        let mut lines: Vec<String> = Vec::new();
+        lines.push("# Solidity LSP Benchmark Results".to_string());
+        lines.push(String::new());
+        lines.push(format!(
+            "{} iterations, {} warmup, {}s timeout",
+            n,
+            w,
+            timeout.as_secs()
+        ));
+        lines.push(String::new());
+
+        // Build header
+        let mut header = "| Benchmark |".to_string();
+        let mut separator = "|-----------|".to_string();
+        for label in &server_labels {
+            header.push_str(&format!(" {} |", label));
+            separator.push_str(&"-".repeat(label.len() + 2));
+            separator.push('|');
+        }
+        lines.push(header);
+        lines.push(separator);
+
+        // Build rows
+        for (bench_name, rows) in &all_results {
+            // Find the best mean among valid results
+            let best_mean = rows
+                .iter()
+                .filter(|r| r.kind == 0)
+                .map(|r| r.mean)
+                .fold(f64::MAX, f64::min);
+
+            let mut row = format!("| {} |", bench_name);
+            for r in rows {
+                let cell = match r.kind {
+                    0 => {
+                        let bolt = if r.mean <= best_mean { " ⚡" } else { "" };
+                        format!(" {:.1}ms{} |", r.mean, bolt)
+                    }
+                    1 => {
+                        // Invalid response (unsupported or empty)
+                        if r.fail_msg.contains("Unknown method") {
+                            " unsupported |".to_string()
+                        } else {
+                            " - |".to_string()
+                        }
+                    }
+                    _ => {
+                        if r.fail_msg.contains("timeout") {
+                            " timeout |".to_string()
+                        } else {
+                            " FAIL |".to_string()
+                        }
+                    }
+                };
+                row.push_str(&cell);
+            }
+            lines.push(row);
+        }
+
+        lines.push(String::new());
+        lines.push("Detailed results per benchmark:".to_string());
+        lines.push(String::new());
+        for name in ALL_BENCHMARKS {
+            lines.push(format!("- [{}](./{}.md)", name, name));
+        }
+        lines.push(String::new());
+
+        let out = lines.join("\n") + "\n";
+        let path = "results/README.md";
+        std::fs::write(path, &out).unwrap();
+        println!("{}", out);
+        eprintln!("  -> {}", path);
     }
 }

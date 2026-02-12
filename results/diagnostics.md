@@ -5,28 +5,38 @@ Measures: didOpen notification -> first publishDiagnostics response
 
 | Server | p50 | p95 | mean |
 |--------|-----|-----|------|
-| Our LSP | 409.1 | 416.9 | 409.8 |
-| solc | 130.2 ⚡ | 132.4 ⚡ | 130.1 ⚡ |
-| nomicfoundation | 914.6 | 922.9 | 914.7 |
+| Our LSP | 648.3 | 668.9 | 650.0 |
+| solc | 131.6 ⚡ | 138.1 ⚡ | 132.5 ⚡ |
+| nomicfoundation | 914.7 | 922.6 | 914.3 |
+| juanfranblanco | FAIL | FAIL | FAIL |
+| qiuxiang | 256.4 | 265.6 | 256.6 |
 
 ### Responses
 
 **Our LSP**
-
 ```json
 "4 diagnostics: [3] [forge lint] function names should use mixedCase (forge-lint); [3] [forge lint] mutable variables sh...
 ```
 
 **solc**
-
 ```json
 "no diagnostics"
 ```
 
 **nomicfoundation**
-
 ```json
 "no diagnostics"
 ```
 
-solc fastest diagnostics (130ms), Our LSP 410ms with , nomicfoundation 915ms with no diags.
+**juanfranblanco**
+```
+FAIL: EOF
+```
+
+**qiuxiang**
+```json
+"no diagnostics"
+```
+
+
+solc fastest diagnostics (133ms), qiuxiang 257ms, Our LSP 650ms, nomicfoundation 914ms, juanfranblanco fail.
