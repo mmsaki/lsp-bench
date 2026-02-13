@@ -18,7 +18,7 @@ Benchmarks comparing Solidity LSP servers against `v4-core` (`src/libraries/Pool
 
 | Server | Description | Version |
 |--------|-------------|---------|
-| [mmsaki](https://github.com/mmsaki/solidity-language-server) | Solidity Language Server by mmsaki | `solidity-language-server 0.1.13+commit.843bd50.macos.aarch64` |
+| [mmsaki](https://github.com/mmsaki/solidity-language-server) | Solidity Language Server by mmsaki | `solidity-language-server 0.1.14+commit.3d6a3d1.macos.aarch64` |
 | [solc](https://docs.soliditylang.org) | Official Solidity compiler LSP | `0.8.33+commit.64118f21.Darwin.appleclang` |
 | [nomicfoundation](https://github.com/NomicFoundation/hardhat-vscode) | Hardhat/Nomic Foundation Solidity Language Server | `@nomicfoundation/solidity-language-server 0.8.25` |
 | [juanfranblanco](https://github.com/juanfranblanco/vscode-solidity) | VSCode Solidity by Juan Blanco | `vscode-solidity-server 0.0.187` |
@@ -28,14 +28,14 @@ Benchmarks comparing Solidity LSP servers against `v4-core` (`src/libraries/Pool
 
 | Benchmark | mmsaki 🏆 | solc | nomicfoundation | juanfranblanco | qiuxiang |
 |-----------|-------------|------|-----------------|----------------|----------|
-| [Spawn + Init](#spawn--init) | 4.00ms 🥇 | 111.00ms 🥉 | 844.30ms | 515.40ms | 69.20ms 🥈 |
-| [Diagnostics](#diagnostics) | 439.00ms 🥈 | 132.70ms 🥇 | timeout | FAIL | timeout |
-| [Go to Definition](#go-to-definition) | 8.60ms 🥇 | - | timeout | FAIL | timeout |
-| [Go to Declaration](#go-to-declaration) | 8.70ms 🥇 | unsupported | timeout | FAIL | timeout |
-| [Hover](#hover) | 13.50ms 🥇 | - | timeout | FAIL | timeout |
-| [Find References](#find-references) | 10.30ms 🥇 | unsupported | timeout | FAIL | timeout |
+| [Spawn + Init](#spawn--init) | 4.20ms 🥇 | 112.00ms 🥉 | 862.40ms | 518.40ms | 68.90ms 🥈 |
+| [Diagnostics](#diagnostics) | 443.10ms 🥈 | 134.40ms 🥇 | timeout | FAIL | timeout |
+| [Go to Definition](#go-to-definition) | 8.90ms 🥇 | - | timeout | FAIL | timeout |
+| [Go to Declaration](#go-to-declaration) | 9.00ms 🥇 | unsupported | timeout | FAIL | timeout |
+| [Hover](#hover) | 13.70ms 🥇 | - | timeout | FAIL | timeout |
+| [Find References](#find-references) | 10.20ms 🥇 | unsupported | timeout | FAIL | timeout |
 | [Document Symbols](#document-symbols) | 8.40ms 🥇 | unsupported | timeout | FAIL | timeout |
-| [Document Links](#document-links) | 62.30ms 🥇 | unsupported | timeout | FAIL | timeout |
+| [Document Links](#document-links) | 64.40ms 🥇 | unsupported | timeout | FAIL | timeout |
 
 > **🏆 Overall Winner: mmsaki** — 7 🥇 out of 8 benchmarks
 
@@ -72,11 +72,11 @@ Benchmarks comparing Solidity LSP servers against `v4-core` (`src/libraries/Pool
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | 🥇 | 4.00ms | 3.90ms | 4.80ms |
-| **solc** | 🥉 | 111.00ms | 111.20ms | 112.80ms |
-| **nomicfoundation** | ok | 844.30ms | 844.10ms | 866.40ms |
-| **juanfranblanco** | ok | 515.40ms | 516.00ms | 521.50ms |
-| **qiuxiang** | 🥈 | 69.20ms | 68.90ms | 76.30ms |
+| **mmsaki** | 🥇 | 4.20ms | 4.20ms | 6.40ms |
+| **solc** | 🥉 | 112.00ms | 112.00ms | 117.10ms |
+| **nomicfoundation** | ok | 862.40ms | 862.60ms | 879.60ms |
+| **juanfranblanco** | ok | 518.40ms | 517.80ms | 524.90ms |
+| **qiuxiang** | 🥈 | 68.90ms | 69.00ms | 70.30ms |
 
 <details>
 <summary>Response details</summary>
@@ -117,8 +117,8 @@ Benchmarks comparing Solidity LSP servers against `v4-core` (`src/libraries/Pool
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | 🥈 | 439.00ms | 438.40ms | 451.30ms |
-| **solc** | 🥇 | 132.70ms | 132.90ms | 134.00ms |
+| **mmsaki** | 🥈 | 443.10ms | 443.80ms | 451.10ms |
+| **solc** | 🥇 | 134.40ms | 134.40ms | 138.80ms |
 | **nomicfoundation** | timeout | - | - | - |
 | **juanfranblanco** | EOF | - | - | - |
 | **qiuxiang** | timeout | - | - | - |
@@ -166,7 +166,7 @@ Error: `timeout`
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | 🥇 | 8.60ms | 8.50ms | 9.90ms |
+| **mmsaki** | 🥇 | 8.90ms | 8.70ms | 9.70ms |
 | **solc** | invalid | - | - | - |
 | **nomicfoundation** | wait_for_diagnostics: timeout | - | - | - |
 | **juanfranblanco** | wait_for_diagnostics: EOF | - | - | - |
@@ -181,7 +181,7 @@ Error: `timeout`
 {
   "range": {
     "end": {
-      "character": 8,
+      "character": 16,
       "line": 9
     },
     "start": {
@@ -215,7 +215,7 @@ Error: `wait_for_diagnostics: timeout`
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | 🥇 | 8.70ms | 8.60ms | 9.50ms |
+| **mmsaki** | 🥇 | 9.00ms | 8.80ms | 9.90ms |
 | **solc** | invalid | - | - | - |
 | **nomicfoundation** | wait_for_diagnostics: timeout | - | - | - |
 | **juanfranblanco** | wait_for_diagnostics: EOF | - | - | - |
@@ -230,7 +230,7 @@ Error: `wait_for_diagnostics: timeout`
 {
   "range": {
     "end": {
-      "character": 8,
+      "character": 16,
       "line": 9
     },
     "start": {
@@ -264,7 +264,7 @@ Error: `wait_for_diagnostics: timeout`
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | 🥇 | 13.50ms | 13.40ms | 13.90ms |
+| **mmsaki** | 🥇 | 13.70ms | 13.70ms | 14.50ms |
 | **solc** | invalid | - | - | - |
 | **nomicfoundation** | wait_for_diagnostics: timeout | - | - | - |
 | **juanfranblanco** | wait_for_diagnostics: EOF | - | - | - |
@@ -305,7 +305,7 @@ Error: `wait_for_diagnostics: timeout`
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | 🥇 | 10.30ms | 10.30ms | 11.10ms |
+| **mmsaki** | 🥇 | 10.20ms | 10.20ms | 11.00ms |
 | **solc** | invalid | - | - | - |
 | **nomicfoundation** | wait_for_diagnostics: timeout | - | - | - |
 | **juanfranblanco** | wait_for_diagnostics: EOF | - | - | - |
@@ -321,12 +321,12 @@ Error: `wait_for_diagnostics: timeout`
   {
     "range": {
       "end": {
-        "character": 38,
-        "line": 434
+        "character": 32,
+        "line": 95
       },
       "start": {
-        "character": 30,
-        "line": 434
+        "character": 24,
+        "line": 95
       }
     },...
 ```
@@ -355,7 +355,7 @@ Error: `wait_for_diagnostics: timeout`
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | 🥇 | 8.40ms | 8.50ms | 8.70ms |
+| **mmsaki** | 🥇 | 8.40ms | 8.40ms | 8.60ms |
 | **solc** | invalid | - | - | - |
 | **nomicfoundation** | wait_for_diagnostics: timeout | - | - | - |
 | **juanfranblanco** | wait_for_diagnostics: EOF | - | - | - |
@@ -405,7 +405,7 @@ Error: `wait_for_diagnostics: timeout`
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | 🥇 | 62.30ms | 62.30ms | 63.00ms |
+| **mmsaki** | 🥇 | 64.40ms | 63.90ms | 70.30ms |
 | **solc** | invalid | - | - | - |
 | **nomicfoundation** | wait_for_diagnostics: timeout | - | - | - |
 | **juanfranblanco** | wait_for_diagnostics: EOF | - | - | - |
@@ -453,6 +453,6 @@ Error: `wait_for_diagnostics: timeout`
 
 ---
 
-*Generated from [`benchmarks/v4-core/2026-02-13T07-18-33Z.json`](benchmarks/v4-core/2026-02-13T07-18-33Z.json) — benchmark run: 2026-02-13T07:18:33Z*
+*Generated from [`benchmarks/v4-core/2026-02-13T08-01-57Z.json`](benchmarks/v4-core/2026-02-13T08-01-57Z.json) — benchmark run: 2026-02-13T08:01:57Z*
 
 See [DOCS.md](./DOCS.md) for usage and installation.
