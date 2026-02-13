@@ -64,12 +64,14 @@ cargo build --release
 | `-n, --iterations` | 10 | Number of measured iterations |
 | `-w, --warmup` | 2 | Number of warmup iterations |
 | `-t, --timeout` | 30 | Timeout per request in seconds |
+| `--md` | off | Generate markdown results |
 | `-h, --help` | | Show help message |
 
 ### Examples
 
 ```sh
-bench all                   # Run all benchmarks (10 iterations, 2 warmup)
+bench all                   # Run all benchmarks (JSON output only)
+bench all --md              # Run all benchmarks and generate markdown
 bench all -n 1 -w 0         # Run all benchmarks once, no warmup
 bench diagnostics -n 5      # Run diagnostics with 5 iterations
 bench spawn definition      # Run specific benchmarks

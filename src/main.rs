@@ -521,13 +521,9 @@ enum BenchResult {
     Ok {
         samples: Vec<f64>,
         first_response: Value,
-        diag_info: Option<DiagnosticsInfo>,
     },
     /// Bench ran but response was null/error — invalidated
-    Invalid {
-        first_response: Value,
-        diag_info: Option<DiagnosticsInfo>,
-    },
+    Invalid { first_response: Value },
     /// Bench failed to run at all
     Fail(String),
 }
@@ -573,6 +569,7 @@ fn run_bench<F>(
     servers: &[&Server],
     root: &str,
     cwd: &Path,
+    generate_md: bool,
     f: F,
 ) -> Vec<BenchRow>
 where
@@ -588,7 +585,6 @@ where
         p95: f64,
         mean: f64,
         summary: String,
-        diag_suffix: String,
         kind: u8,
         fail_msg: String,
     }
@@ -601,13 +597,9 @@ where
             BenchResult::Ok {
                 mut samples,
                 first_response,
-                diag_info,
             } => {
                 let (p50, p95, mean) = stats(&mut samples);
                 let summary = response_summary(&first_response);
-                let diag_suffix = diag_info
-                    .map(|di| format!("  [diag: {} in {:.0}ms]", di.count, di.elapsed_ms))
-                    .unwrap_or_default();
                 eprintln!("done");
                 results.push((srv.label.to_string(), p50, p95, mean, summary.clone()));
                 rows.push(Row {
@@ -616,19 +608,12 @@ where
                     p95,
                     mean,
                     summary,
-                    diag_suffix,
                     kind: 0,
                     fail_msg: String::new(),
                 });
             }
-            BenchResult::Invalid {
-                first_response,
-                diag_info,
-            } => {
+            BenchResult::Invalid { first_response } => {
                 let summary = response_summary(&first_response);
-                let diag_suffix = diag_info
-                    .map(|di| format!("  [diag: {} in {:.0}ms]", di.count, di.elapsed_ms))
-                    .unwrap_or_default();
                 eprintln!("invalid");
                 results.push((srv.label.to_string(), 0.0, 0.0, 0.0, summary.clone()));
                 rows.push(Row {
@@ -637,7 +622,6 @@ where
                     p95: 0.0,
                     mean: 0.0,
                     summary,
-                    diag_suffix,
                     kind: 1,
                     fail_msg: String::new(),
                 });
@@ -651,7 +635,6 @@ where
                     p95: 0.0,
                     mean: 0.0,
                     summary: String::new(),
-                    diag_suffix: String::new(),
                     kind: 2,
                     fail_msg: e,
                 });
@@ -708,14 +691,14 @@ where
     for row in &rows {
         match row.kind {
             0 => {
-                lines.push(format!("**{}**{}", row.label, row.diag_suffix));
+                lines.push(format!("**{}**", row.label));
                 lines.push("```json".to_string());
                 lines.push(row.summary.clone());
                 lines.push("```".to_string());
                 lines.push("".to_string());
             }
             1 => {
-                lines.push(format!("**{}**{}", row.label, row.diag_suffix));
+                lines.push(format!("**{}**", row.label));
                 lines.push("```".to_string());
                 lines.push(row.summary.clone());
                 lines.push("```".to_string());
@@ -736,12 +719,14 @@ where
     let summary = generate_summary(name, &results);
     lines.push(summary);
 
-    let out = lines.join("\n") + "\n";
-    let path = format!("results/{}.md", name);
-    let _ = std::fs::create_dir_all("results");
-    std::fs::write(&path, &out).unwrap();
-    println!("{}", out);
-    eprintln!("  -> {}", path);
+    if generate_md {
+        let out = lines.join("\n") + "\n";
+        let path = format!("results/{}.md", name);
+        let _ = std::fs::create_dir_all("results");
+        std::fs::write(&path, &out).unwrap();
+        println!("{}", out);
+        eprintln!("  -> {}", path);
+    }
 
     // Return rows for summary generation
     rows.iter()
@@ -850,10 +835,12 @@ fn print_usage() {
     eprintln!("  -n, --iterations <N>  Number of measured iterations (default: 10)");
     eprintln!("  -w, --warmup <N>      Number of warmup iterations (default: 2)");
     eprintln!("  -t, --timeout <SECS>  Timeout per request in seconds (default: 30)");
+    eprintln!("  --md                  Generate markdown results (off by default)");
     eprintln!("  -h, --help            Show this help message");
     eprintln!();
     eprintln!("Examples:");
-    eprintln!("  bench all                  Run all benchmarks (10 iterations, 2 warmup)");
+    eprintln!("  bench all                  Run all benchmarks (JSON output only)");
+    eprintln!("  bench all --md             Run all benchmarks and generate markdown");
     eprintln!("  bench all -n 1 -w 0        Run all benchmarks once, no warmup");
     eprintln!("  bench diagnostics -n 5     Run diagnostics with 5 iterations");
     eprintln!("  bench all -t 10            Run all benchmarks with 10s timeout");
@@ -866,6 +853,7 @@ fn main() {
     let mut n: usize = 10;
     let mut w: usize = 2;
     let mut timeout_secs: u64 = 30;
+    let mut generate_md = false;
     let mut commands: Vec<String> = Vec::new();
 
     let mut i = 1;
@@ -895,6 +883,9 @@ fn main() {
                     eprintln!("Error: -t requires a number (seconds)");
                     std::process::exit(1);
                 });
+            }
+            "--md" => {
+                generate_md = true;
             }
             other => {
                 commands.push(other.to_string());
@@ -978,6 +969,7 @@ fn main() {
             &avail,
             &root,
             Path::new(v4),
+            generate_md,
             |srv, root, cwd| {
                 let mut samples = Vec::new();
                 for i in 0..(w + n) {
@@ -998,7 +990,7 @@ fn main() {
                 BenchResult::Ok {
                     samples,
                     first_response: json!({"result": "ok"}),
-                    diag_info: None,
+
                 }
             },
         );
@@ -1028,6 +1020,7 @@ fn main() {
             &avail,
             &root,
             Path::new(v4),
+            generate_md,
             |srv, root, cwd| {
                 let mut samples = Vec::new();
                 let mut first: Option<DiagnosticsInfo> = None;
@@ -1065,7 +1058,6 @@ fn main() {
                 BenchResult::Ok {
                     samples,
                     first_response: diag_info.message.clone(),
-                    diag_info: None,
                 }
             },
         );
@@ -1103,6 +1095,7 @@ fn main() {
             &avail,
             &root,
             Path::new(v4),
+            generate_md,
             |srv, root, cwd| {
                 let mut c = match LspClient::spawn(srv.cmd, srv.args, cwd) {
                     Ok(c) => c,
@@ -1158,7 +1151,6 @@ fn main() {
                                     }
                                     return BenchResult::Invalid {
                                         first_response: resp,
-                                        diag_info: Some(diag_info),
                                     };
                                 }
                                 samples.push(ms);
@@ -1171,7 +1163,6 @@ fn main() {
                 BenchResult::Ok {
                     samples,
                     first_response: first.unwrap_or(json!(null)),
-                    diag_info: Some(diag_info),
                 }
             },
         );
@@ -1209,6 +1200,7 @@ fn main() {
             &avail,
             &root,
             Path::new(v4),
+            generate_md,
             |srv, root, cwd| {
                 let mut c = match LspClient::spawn(srv.cmd, srv.args, cwd) {
                     Ok(c) => c,
@@ -1264,7 +1256,6 @@ fn main() {
                                     }
                                     return BenchResult::Invalid {
                                         first_response: resp,
-                                        diag_info: Some(diag_info),
                                     };
                                 }
                                 samples.push(ms);
@@ -1277,7 +1268,6 @@ fn main() {
                 BenchResult::Ok {
                     samples,
                     first_response: first.unwrap_or(json!(null)),
-                    diag_info: Some(diag_info),
                 }
             },
         );
@@ -1312,6 +1302,7 @@ fn main() {
             &avail,
             &root,
             Path::new(v4),
+            generate_md,
             |srv, root, cwd| {
                 let mut c = match LspClient::spawn(srv.cmd, srv.args, cwd) {
                     Ok(c) => c,
@@ -1359,7 +1350,6 @@ fn main() {
                                 if !is_valid_response(&resp) {
                                     return BenchResult::Invalid {
                                         first_response: resp,
-                                        diag_info: Some(diag_info),
                                     };
                                 }
                                 samples.push(ms);
@@ -1374,7 +1364,6 @@ fn main() {
                 BenchResult::Ok {
                     samples,
                     first_response: first.unwrap_or(json!(null)),
-                    diag_info: Some(diag_info),
                 }
             },
         );
@@ -1412,6 +1401,7 @@ fn main() {
             &avail,
             &root,
             Path::new(v4),
+            generate_md,
             |srv, root, cwd| {
                 let mut c = match LspClient::spawn(srv.cmd, srv.args, cwd) {
                     Ok(c) => c,
@@ -1460,7 +1450,6 @@ fn main() {
                                 if !is_valid_response(&resp) {
                                     return BenchResult::Invalid {
                                         first_response: resp,
-                                        diag_info: Some(diag_info),
                                     };
                                 }
                                 samples.push(ms);
@@ -1475,7 +1464,6 @@ fn main() {
                 BenchResult::Ok {
                     samples,
                     first_response: first.unwrap_or(json!(null)),
-                    diag_info: Some(diag_info),
                 }
             },
         );
@@ -1506,6 +1494,7 @@ fn main() {
             &avail,
             &root,
             Path::new(v4),
+            generate_md,
             |srv, root, cwd| {
                 let mut c = match LspClient::spawn(srv.cmd, srv.args, cwd) {
                     Ok(c) => c,
@@ -1552,7 +1541,6 @@ fn main() {
                                 if !is_valid_response(&resp) {
                                     return BenchResult::Invalid {
                                         first_response: resp,
-                                        diag_info: Some(diag_info),
                                     };
                                 }
                                 samples.push(ms);
@@ -1567,7 +1555,6 @@ fn main() {
                 BenchResult::Ok {
                     samples,
                     first_response: first.unwrap_or(json!(null)),
-                    diag_info: Some(diag_info),
                 }
             },
         );
@@ -1595,6 +1582,7 @@ fn main() {
             &avail,
             &root,
             Path::new(v4),
+            generate_md,
             |srv, root, cwd| {
                 let mut c = match LspClient::spawn(srv.cmd, srv.args, cwd) {
                     Ok(c) => c,
@@ -1641,7 +1629,6 @@ fn main() {
                                 if !is_valid_response(&resp) {
                                     return BenchResult::Invalid {
                                         first_response: resp,
-                                        diag_info: Some(diag_info),
                                     };
                                 }
                                 samples.push(ms);
@@ -1656,7 +1643,6 @@ fn main() {
                 BenchResult::Ok {
                     samples,
                     first_response: first.unwrap_or(json!(null)),
-                    diag_info: Some(diag_info),
                 }
             },
         );
@@ -1719,8 +1705,8 @@ fn main() {
         std::fs::write(&json_path, &json_pretty).unwrap();
         eprintln!("  -> {}", json_path);
 
-        // ── results/README.md (only for full runs) ────────────────────────
-        if is_full_run {
+        // ── results/README.md (only for full runs with --md) ────────────────
+        if is_full_run && generate_md {
             let mut lines: Vec<String> = Vec::new();
             lines.push("# Solidity LSP Benchmark Results".to_string());
             lines.push(String::new());
