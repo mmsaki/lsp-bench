@@ -98,11 +98,19 @@ fn generate_readme(data: &Value, json_path: &str) -> String {
             .get("index_timeout_secs")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
+        let file = settings
+            .get("file")
+            .and_then(|v| v.as_str())
+            .unwrap_or("src/libraries/Pool.sol");
+        let line = settings.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
+        let col = settings.get("col").and_then(|v| v.as_u64()).unwrap_or(0);
 
         l.push("## Settings".into());
         l.push(String::new());
         l.push("| Setting | Value |".into());
         l.push("|---------|-------|".into());
+        l.push(format!("| File | `{}` |", file));
+        l.push(format!("| Target position | line {}, col {} |", line, col));
         l.push(format!("| Iterations | {} |", iterations));
         l.push(format!("| Warmup | {} |", warmup));
         l.push(format!("| Request timeout | {}s |", timeout));
@@ -356,8 +364,9 @@ fn generate_readme(data: &Value, json_path: &str) -> String {
                                     .get("response")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("(no response)");
+                                let truncated = truncate_response(response, 200);
                                 l.push("```json".into());
-                                l.push(response.to_string());
+                                l.push(truncated);
                                 l.push("```".into());
                             }
                             _ => {
@@ -489,6 +498,17 @@ fn format_summary_cell(
             }
         }
     }
+}
+
+/// Truncate a response string to max_chars, appending "..." if truncated.
+fn truncate_response(s: &str, max_chars: usize) -> String {
+    if s.len() <= max_chars {
+        return s.to_string();
+    }
+    // Find a clean break point (end of line) near the limit
+    let truncated = &s[..max_chars];
+    let break_at = truncated.rfind('\n').unwrap_or(max_chars);
+    format!("{}...", &s[..break_at])
 }
 
 /// Format an optional millisecond value.

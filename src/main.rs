@@ -410,23 +410,29 @@ fn is_valid_response(resp: &Value) -> bool {
     }
 }
 
-fn response_summary(resp: &Value) -> String {
-    if let Some(err) = resp.get("error") {
-        return format!(
+fn response_summary(resp: &Value, max_chars: usize) -> String {
+    let full = if let Some(err) = resp.get("error") {
+        format!(
             "error: {}",
             err.get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("unknown")
-        );
-    }
-    let payload = resp.get("result").or_else(|| resp.get("params"));
-    if let Some(r) = payload {
+        )
+    } else if let Some(r) = resp.get("result").or_else(|| resp.get("params")) {
         if r.is_null() {
-            return "null".into();
+            "null".into()
+        } else {
+            serde_json::to_string_pretty(r).unwrap_or_default()
         }
-        return serde_json::to_string_pretty(r).unwrap_or_default();
+    } else {
+        "no result".into()
+    };
+    if full.len() <= max_chars {
+        full
+    } else {
+        let break_at = full[..max_chars].rfind('\n').unwrap_or(max_chars);
+        format!("{}...", &full[..break_at])
     }
-    "no result".into()
 }
 
 // ── Servers ─────────────────────────────────────────────────────────────────
@@ -589,7 +595,7 @@ fn bench_diagnostics(
     srv: &Server,
     root: &str,
     cwd: &Path,
-    pool_sol: &Path,
+    target_file: &Path,
     timeout: Duration,
     w: usize,
     n: usize,
@@ -607,7 +613,7 @@ fn bench_diagnostics(
             return BenchResult::Fail(e);
         }
         let start = Instant::now();
-        if let Err(e) = c.open_file(pool_sol) {
+        if let Err(e) = c.open_file(target_file) {
             return BenchResult::Fail(e);
         }
         match c.wait_for_valid_diagnostics(timeout) {
@@ -640,7 +646,7 @@ fn bench_lsp_method(
     srv: &Server,
     root: &str,
     cwd: &Path,
-    pool_sol: &Path,
+    target_file: &Path,
     method: &str,
     params_fn: &dyn Fn(&str) -> Value, // takes file_uri, returns params
     index_timeout: Duration,
@@ -657,7 +663,7 @@ fn bench_lsp_method(
     if let Err(e) = c.initialize(root) {
         return BenchResult::Fail(e);
     }
-    if let Err(e) = c.open_file(pool_sol) {
+    if let Err(e) = c.open_file(target_file) {
         return BenchResult::Fail(e);
     }
     on_progress("waiting for diagnostics");
@@ -666,7 +672,7 @@ fn bench_lsp_method(
         Err(e) => return BenchResult::Fail(format!("wait_for_diagnostics: {}", e)),
     }
 
-    let file_uri = uri(pool_sol);
+    let file_uri = uri(target_file);
     let mut samples = Vec::new();
     let mut first: Option<Value> = None;
     for i in 0..(w + n) {
@@ -716,7 +722,7 @@ where
                 first_response,
             } => {
                 let (p50, p95, mean) = stats(&mut samples);
-                let summary = response_summary(&first_response);
+                let summary = response_summary(&first_response, 500);
                 finish_pass(&pb, mean, p50, p95);
                 rows.push(BenchRow {
                     label: srv.label.to_string(),
@@ -729,7 +735,7 @@ where
                 });
             }
             BenchResult::Invalid { first_response } => {
-                let summary = response_summary(&first_response);
+                let summary = response_summary(&first_response, 500);
                 finish_fail(&pb, "invalid response");
                 rows.push(BenchRow {
                     label: srv.label.to_string(),
@@ -767,6 +773,9 @@ fn save_json(
     w: usize,
     timeout: &Duration,
     index_timeout: &Duration,
+    bench_file: &str,
+    target_line: u32,
+    target_col: u32,
     dir: &str,
 ) -> String {
     let ts = timestamp();
@@ -792,6 +801,9 @@ fn save_json(
             "warmup": w,
             "timeout_secs": timeout.as_secs(),
             "index_timeout_secs": index_timeout.as_secs(),
+            "file": bench_file,
+            "line": target_line,
+            "col": target_col,
         },
         "servers": json_servers,
         "benchmarks": json_benchmarks,
@@ -831,11 +843,20 @@ fn print_usage() {
     eprintln!("  documentLink   -- get document links for Pool.sol");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  -n, --iterations <N>  Number of measured iterations (default: 10)");
-    eprintln!("  -w, --warmup <N>      Number of warmup iterations (default: 2)");
+    eprintln!("  -n, --iterations <N>         Number of measured iterations (default: 10)");
+    eprintln!("  -w, --warmup <N>             Number of warmup iterations (default: 2)");
     eprintln!("  -t, --timeout <SECS>         Timeout per request in seconds (default: 10)");
     eprintln!("  -T, --index-timeout <SECS>   Time for server to index/warm up (default: 15)");
     eprintln!("  -s, --server <NAME>          Only run against this server (can repeat)");
+    eprintln!(
+        "  -f, --file <PATH>            Solidity file to benchmark (relative to project root)"
+    );
+    eprintln!(
+        "  --line <N>                   Target line for position-based benchmarks (default: 102)"
+    );
+    eprintln!(
+        "  --col <N>                    Target column for position-based benchmarks (default: 15)"
+    );
     eprintln!("  -h, --help                   Show this help message");
     eprintln!();
     eprintln!("Servers:");
@@ -844,10 +865,12 @@ fn print_usage() {
     }
     eprintln!();
     eprintln!("Examples:");
-    eprintln!("  bench all                        Run all benchmarks, all servers");
-    eprintln!("  bench all -s solc                Run all benchmarks, only solc");
-    eprintln!("  bench diagnostics -s nomic -s solc   Diagnostics for two servers");
-    eprintln!("  bench hover -n 1 -w 0            Single hover iteration, no warmup");
+    eprintln!("  bench all                          Run all benchmarks, all servers");
+    eprintln!("  bench all -s solc                  Run all benchmarks, only solc");
+    eprintln!("  bench diagnostics -s nomic -s solc Diagnostics for two servers");
+    eprintln!("  bench hover -n 1 -w 0              Single hover iteration, no warmup");
+    eprintln!("  bench all -f src/PoolManager.sol   Benchmark a different file");
+    eprintln!("  bench definition --line 50 --col 8 Target a specific position");
 }
 
 fn main() {
@@ -859,6 +882,9 @@ fn main() {
     let mut index_timeout_secs: u64 = 15;
     let mut commands: Vec<String> = Vec::new();
     let mut server_filter: Vec<String> = Vec::new();
+    let mut bench_file: Option<String> = None;
+    let mut target_line: u32 = 102;
+    let mut target_col: u32 = 15;
 
     let mut i = 1;
     while i < args.len() {
@@ -904,6 +930,31 @@ fn main() {
                 });
                 server_filter.push(name.to_lowercase());
             }
+            "-f" | "--file" => {
+                i += 1;
+                bench_file = Some(
+                    args.get(i)
+                        .unwrap_or_else(|| {
+                            eprintln!("Error: -f requires a file path");
+                            std::process::exit(1);
+                        })
+                        .clone(),
+                );
+            }
+            "--line" => {
+                i += 1;
+                target_line = args.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("Error: --line requires a number");
+                    std::process::exit(1);
+                });
+            }
+            "--col" => {
+                i += 1;
+                target_col = args.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("Error: --col requires a number");
+                    std::process::exit(1);
+                });
+            }
             other => commands.push(other.to_string()),
         }
         i += 1;
@@ -940,7 +991,20 @@ fn main() {
         });
     let cwd = Path::new(v4);
     let root = uri(cwd);
-    let pool_sol = cwd.join("src/libraries/Pool.sol");
+    let default_file = "src/libraries/Pool.sol";
+    let bench_file_rel = bench_file.as_deref().unwrap_or(default_file);
+    let bench_sol = cwd.join(bench_file_rel);
+    if !bench_sol.exists() {
+        eprintln!("Error: benchmark file not found: {}", bench_sol.display());
+        std::process::exit(1);
+    }
+    eprintln!(
+        "  {} {}  (line {}, col {})",
+        style("file").dim(),
+        bench_file_rel,
+        target_line,
+        target_col
+    );
 
     let avail: Vec<&Server> = SERVERS
         .iter()
@@ -975,8 +1039,6 @@ fn main() {
     let mut all_results: Vec<(&str, Vec<BenchRow>)> = Vec::new();
 
     // Position + method params for definition/declaration/hover/references
-    let target_line: u32 = 102;
-    let target_col: u32 = 15;
     let position_params = |file_uri: &str| -> Value {
         json!({
             "textDocument": { "uri": file_uri },
@@ -1046,6 +1108,9 @@ fn main() {
             w,
             &timeout,
             &index_timeout,
+            bench_file_rel,
+            target_line,
+            target_col,
             "benchmarks/partial",
         );
         eprintln!("  {} {}", style("saved").dim(), style(&p).dim());
@@ -1060,7 +1125,16 @@ fn main() {
             style(format!("[{}/{}] Diagnostics", num, total)).bold()
         );
         let rows = run_bench(&avail, |srv, on_progress| {
-            bench_diagnostics(srv, &root, cwd, &pool_sol, index_timeout, w, n, on_progress)
+            bench_diagnostics(
+                srv,
+                &root,
+                cwd,
+                &bench_sol,
+                index_timeout,
+                w,
+                n,
+                on_progress,
+            )
         });
         all_results.push(("Diagnostics", rows));
         let p = save_json(
@@ -1070,6 +1144,9 @@ fn main() {
             w,
             &timeout,
             &index_timeout,
+            bench_file_rel,
+            target_line,
+            target_col,
             "benchmarks/partial",
         );
         eprintln!("  {} {}", style("saved").dim(), style(&p).dim());
@@ -1089,7 +1166,7 @@ fn main() {
                     srv,
                     &root,
                     cwd,
-                    &pool_sol,
+                    &bench_sol,
                     method,
                     *params_fn,
                     index_timeout,
@@ -1107,6 +1184,9 @@ fn main() {
                 w,
                 &timeout,
                 &index_timeout,
+                bench_file_rel,
+                target_line,
+                target_col,
                 "benchmarks/partial",
             );
             eprintln!("  {} {}", style("saved").dim(), style(&p).dim());
@@ -1131,6 +1211,9 @@ fn main() {
             w,
             &timeout,
             &index_timeout,
+            bench_file_rel,
+            target_line,
+            target_col,
             &dir,
         );
         eprintln!("\n  {} {}", style("->").green().bold(), path);
