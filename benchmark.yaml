@@ -11,11 +11,11 @@ line: 102
 col: 15
 
 # Benchmark settings
-iterations: 1
+iterations: 10
 warmup: 2
 timeout: 10        # seconds per request
 index_timeout: 15  # seconds for server to index/warm up
-output: benchmarks # directory for JSON results
+output: benchmarks/v4-core # directory for JSON results
 benchmarks:
   - spawn
   - diagnostics
