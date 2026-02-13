@@ -530,6 +530,7 @@ struct BenchRow {
     p50: f64,
     p95: f64,
     mean: f64,
+    samples: Vec<f64>,
     kind: u8,
     fail_msg: String,
     summary: String,
@@ -538,14 +539,22 @@ struct BenchRow {
 impl BenchRow {
     fn to_json(&self) -> Value {
         match self.kind {
-            0 => json!({
-                "server": self.label,
-                "status": "ok",
-                "p50_ms": (self.p50 * 10.0).round() / 10.0,
-                "p95_ms": (self.p95 * 10.0).round() / 10.0,
-                "mean_ms": (self.mean * 10.0).round() / 10.0,
-                "response": self.summary,
-            }),
+            0 => {
+                let rounded: Vec<f64> = self
+                    .samples
+                    .iter()
+                    .map(|s| (s * 100.0).round() / 100.0)
+                    .collect();
+                json!({
+                    "server": self.label,
+                    "status": "ok",
+                    "p50_ms": (self.p50 * 10.0).round() / 10.0,
+                    "p95_ms": (self.p95 * 10.0).round() / 10.0,
+                    "mean_ms": (self.mean * 10.0).round() / 10.0,
+                    "samples_ms": rounded,
+                    "response": self.summary,
+                })
+            }
             1 => json!({
                 "server": self.label,
                 "status": "invalid",
@@ -770,6 +779,7 @@ where
                     p50,
                     p95,
                     mean,
+                    samples,
                     summary,
                     kind: 0,
                     fail_msg: String::new(),
@@ -783,6 +793,7 @@ where
                     p50: 0.0,
                     p95: 0.0,
                     mean: 0.0,
+                    samples: vec![],
                     summary,
                     kind: 1,
                     fail_msg: String::new(),
@@ -795,6 +806,7 @@ where
                     p50: 0.0,
                     p95: 0.0,
                     mean: 0.0,
+                    samples: vec![],
                     summary: String::new(),
                     kind: 2,
                     fail_msg: e,
