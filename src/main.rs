@@ -5,6 +5,25 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+fn timestamp() -> String {
+    let output = Command::new("date")
+        .args(&["-u", "+%Y-%m-%dT%H:%M:%SZ"])
+        .output()
+        .ok();
+    output
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn date_stamp() -> String {
+    let output = Command::new("date").args(&["+%Y-%m-%d"]).output().ok();
+    output
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 // ── LSP Client ──────────────────────────────────────────────────────────────
 
 struct LspClient {
@@ -307,6 +326,109 @@ fn available(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Resolve symlinks to find the real binary path.
+fn resolve_binary(cmd: &str) -> Option<String> {
+    let which_out = Command::new("which")
+        .arg(cmd)
+        .stdout(Stdio::piped())
+        .output()
+        .ok()?;
+    let bin_path = String::from_utf8_lossy(&which_out.stdout)
+        .trim()
+        .to_string();
+    if bin_path.is_empty() {
+        return None;
+    }
+    // Try readlink -f (Linux) or realpath via canonicalize
+    std::fs::canonicalize(&bin_path)
+        .map(|p| p.to_string_lossy().to_string())
+        .ok()
+        .or(Some(bin_path))
+}
+
+/// Detect server version. Strategy:
+/// 1. For solc: parse `solc --version` output for the Version: line
+/// 2. For others: try `<cmd> --version` and take the first non-empty line
+/// 3. Fallback: resolve binary symlinks, walk up to find package.json
+fn detect_version(cmd: &str) -> String {
+    // Special handling for solc — its --version prints a banner
+    if cmd == "solc" {
+        if let Ok(output) = Command::new("solc")
+            .arg("--version")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.starts_with("Version:") {
+                    return line.trim_start_matches("Version:").trim().to_string();
+                }
+            }
+        }
+    }
+
+    // Try --version (works for our LSP and some others)
+    if let Ok(output) = Command::new(cmd)
+        .arg("--version")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let line = stdout.lines().next().unwrap_or("").trim().to_string();
+            if !line.is_empty() {
+                return line;
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let line = stderr.lines().next().unwrap_or("").trim().to_string();
+            if !line.is_empty() {
+                return line;
+            }
+        }
+    }
+
+    // Fallback: resolve binary path (following symlinks) and find package.json
+    if let Some(real_path) = resolve_binary(cmd) {
+        let mut dir = Path::new(&real_path).to_path_buf();
+        for _ in 0..10 {
+            dir = match dir.parent() {
+                Some(p) => p.to_path_buf(),
+                None => break,
+            };
+            let pkg = dir.join("package.json");
+            if pkg.exists() {
+                if let Ok(content) = std::fs::read_to_string(&pkg) {
+                    if let Ok(v) = serde_json::from_str::<Value>(&content) {
+                        if let Some(ver) = v.get("version").and_then(|v| v.as_str()) {
+                            let name = v.get("name").and_then(|n| n.as_str()).unwrap_or(cmd);
+                            return format!("{} {}", name, ver);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback for volta/npm: try `npm info <cmd> version`
+    if let Ok(output) = Command::new("npm")
+        .args(&["info", cmd, "version"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+    {
+        if output.status.success() {
+            let ver = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !ver.is_empty() {
+                return format!("{} {}", cmd, ver);
+            }
+        }
+    }
+
+    "unknown".to_string()
+}
+
 fn stats(samples: &mut Vec<f64>) -> (f64, f64, f64) {
     samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let n = samples.len();
@@ -416,13 +538,37 @@ enum BenchResult {
 
 struct BenchRow {
     label: String,
-    #[allow(dead_code)]
     p50: f64,
-    #[allow(dead_code)]
     p95: f64,
     mean: f64,
     kind: u8, // 0=ok, 1=invalid, 2=fail
     fail_msg: String,
+    summary: String,
+}
+
+impl BenchRow {
+    fn to_json(&self) -> Value {
+        match self.kind {
+            0 => json!({
+                "server": self.label,
+                "status": "ok",
+                "p50_ms": (self.p50 * 10.0).round() / 10.0,
+                "p95_ms": (self.p95 * 10.0).round() / 10.0,
+                "mean_ms": (self.mean * 10.0).round() / 10.0,
+                "response": self.summary,
+            }),
+            1 => json!({
+                "server": self.label,
+                "status": "invalid",
+                "response": self.summary,
+            }),
+            _ => json!({
+                "server": self.label,
+                "status": "fail",
+                "error": self.fail_msg,
+            }),
+        }
+    }
 }
 
 fn run_bench<F>(
@@ -593,6 +739,7 @@ where
             mean: r.mean,
             kind: r.kind,
             fail_msg: r.fail_msg.clone(),
+            summary: r.summary.clone(),
         })
         .collect()
 }
@@ -785,7 +932,17 @@ fn main() {
         })
         .collect();
 
-    let run_all = benchmarks.len() == ALL_BENCHMARKS.len();
+    // Detect versions for available servers
+    eprintln!("Detecting server versions...");
+    let versions: Vec<(&str, String)> = avail
+        .iter()
+        .map(|s| {
+            let ver = detect_version(s.cmd);
+            eprintln!("  {} = {}", s.label, ver);
+            (s.label, ver)
+        })
+        .collect();
+
     let mut all_results: Vec<(&str, Vec<BenchRow>)> = Vec::new();
 
     // ── spawn ───────────────────────────────────────────────────────────────
@@ -1435,24 +1592,97 @@ fn main() {
         all_results.push(("Document Symbols", rows));
     }
 
-    // ── Generate results/README.md summary ──────────────────────────────────
+    // ── Generate outputs ──────────────────────────────────────────────────
 
-    if run_all && !all_results.is_empty() {
-        // Collect server labels from the first benchmark's rows
+    if !all_results.is_empty() {
         let server_labels: Vec<&str> = all_results[0].1.iter().map(|r| r.label.as_str()).collect();
+        let ts = timestamp();
+        let date = date_stamp();
+
+        // ── JSON output ─────────────────────────────────────────────────
+
+        let json_benchmarks: Vec<Value> = all_results
+            .iter()
+            .map(|(bench_name, rows)| {
+                json!({
+                    "name": bench_name,
+                    "servers": rows.iter().map(|r| r.to_json()).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+
+        let json_servers: Vec<Value> = versions
+            .iter()
+            .map(|(label, ver)| {
+                json!({
+                    "name": label,
+                    "version": ver,
+                })
+            })
+            .collect();
+
+        let json_output = json!({
+            "timestamp": ts,
+            "date": date,
+            "settings": {
+                "iterations": n,
+                "warmup": w,
+                "timeout_secs": timeout.as_secs(),
+            },
+            "servers": json_servers,
+            "benchmarks": json_benchmarks,
+        });
+
+        // Write timestamped JSON
+        let _ = std::fs::create_dir_all("benchmarks");
+        let json_path = format!("benchmarks/{}.json", date);
+        let json_pretty = serde_json::to_string_pretty(&json_output).unwrap();
+        std::fs::write(&json_path, &json_pretty).unwrap();
+        eprintln!("  -> {}", json_path);
+
+        // Append to history.json
+        let history_path = "benchmarks/history.json";
+        let mut history: Vec<Value> = std::fs::read_to_string(history_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        history.push(json_output);
+        let history_pretty = serde_json::to_string_pretty(&history).unwrap();
+        std::fs::write(history_path, &history_pretty).unwrap();
+        eprintln!("  -> {}", history_path);
+
+        // ── results/README.md ───────────────────────────────────────────
 
         let mut lines: Vec<String> = Vec::new();
         lines.push("# Solidity LSP Benchmark Results".to_string());
         lines.push(String::new());
-        lines.push(format!(
-            "{} iterations, {} warmup, {}s timeout",
-            n,
-            w,
-            timeout.as_secs()
-        ));
+        lines.push(format!("Date: {}", date));
         lines.push(String::new());
 
-        // Build header
+        // Settings table
+        lines.push("## Settings".to_string());
+        lines.push(String::new());
+        lines.push("| Setting | Value |".to_string());
+        lines.push("|---------|-------|".to_string());
+        lines.push(format!("| Iterations | {} |", n));
+        lines.push(format!("| Warmup | {} |", w));
+        lines.push(format!("| Timeout | {}s |", timeout.as_secs()));
+        lines.push(String::new());
+
+        // Servers table with versions
+        lines.push("## Servers".to_string());
+        lines.push(String::new());
+        lines.push("| Server | Version |".to_string());
+        lines.push("|--------|---------|".to_string());
+        for (label, ver) in &versions {
+            lines.push(format!("| {} | {} |", label, ver));
+        }
+        lines.push(String::new());
+
+        // Results table
+        lines.push("## Results".to_string());
+        lines.push(String::new());
+
         let mut header = "| Benchmark |".to_string();
         let mut separator = "|-----------|".to_string();
         for label in &server_labels {
@@ -1463,9 +1693,7 @@ fn main() {
         lines.push(header);
         lines.push(separator);
 
-        // Build rows
         for (bench_name, rows) in &all_results {
-            // Find the best mean among valid results
             let best_mean = rows
                 .iter()
                 .filter(|r| r.kind == 0)
@@ -1480,8 +1708,8 @@ fn main() {
                         format!(" {:.1}ms{} |", r.mean, bolt)
                     }
                     1 => {
-                        // Invalid response (unsupported or empty)
-                        if r.fail_msg.contains("Unknown method") {
+                        if r.summary.contains("Unknown method") || r.summary.contains("unsupported")
+                        {
                             " unsupported |".to_string()
                         } else {
                             " - |".to_string()
@@ -1501,15 +1729,32 @@ fn main() {
         }
 
         lines.push(String::new());
-        lines.push("Detailed results per benchmark:".to_string());
+        lines.push("## Detailed Results".to_string());
         lines.push(String::new());
         for name in ALL_BENCHMARKS {
-            lines.push(format!("- [{}](./{}.md)", name, name));
+            if all_results.iter().any(|(_, rows)| {
+                rows.first().map(|_| true).unwrap_or(false)
+                    && all_results.iter().any(|(n, _)| {
+                        *n == match *name {
+                            "spawn" => "Spawn + Init",
+                            "diagnostics" => "Diagnostics",
+                            "definition" => "Go to Definition",
+                            "declaration" => "Go to Declaration",
+                            "hover" => "Hover",
+                            "references" => "Find References",
+                            "documentSymbol" => "Document Symbols",
+                            _ => "",
+                        }
+                    })
+            }) {
+                lines.push(format!("- [{}](./{}.md)", name, name));
+            }
         }
         lines.push(String::new());
 
         let out = lines.join("\n") + "\n";
         let path = "results/README.md";
+        let _ = std::fs::create_dir_all("results");
         std::fs::write(path, &out).unwrap();
         println!("{}", out);
         eprintln!("  -> {}", path);

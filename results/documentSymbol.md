@@ -6,7 +6,7 @@ Waits for valid publishDiagnostics before sending requests.
 
 | Server | p50 | p95 | mean |
 |--------|-----|-----|------|
-| Our LSP | 21.1 ⚡ | 35.8 ⚡ | 22.2 ⚡ |
+| Our LSP | 18.7 ⚡ | 37.7 ⚡ | 21.9 ⚡ |
 | solc | - | - | - |
 | nomicfoundation | FAIL | FAIL | FAIL |
 | juanfranblanco | FAIL | FAIL | FAIL |
@@ -14,12 +14,12 @@ Waits for valid publishDiagnostics before sending requests.
 
 ### Responses
 
-**Our LSP**  [diag: 4 in 420ms]
+**Our LSP**  [diag: 4 in 444ms]
 ```json
 [{"kind":15,"name":"solidity ^0.8.0","range":{"end":{"character":23,"line":1},"start":{"character":0,"line":1}},"selecti...
 ```
 
-**solc**  [diag: 1 in 139ms]
+**solc**  [diag: 1 in 142ms]
 ```
 error: Unknown method textDocument/documentSymbol
 ```
@@ -40,4 +40,4 @@ FAIL: wait_for_diagnostics: timeout
 ```
 
 
-Our LSP 22.2ms, solc unsupported, nomicfoundation timeout, juanfranblanco timeout, qiuxiang timeout.
+Our LSP 21.9ms, solc unsupported, nomicfoundation timeout, juanfranblanco timeout, qiuxiang timeout.

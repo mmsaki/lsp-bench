@@ -7,7 +7,7 @@ Waits for valid publishDiagnostics before sending requests.
 
 | Server | p50 | p95 | mean |
 |--------|-----|-----|------|
-| Our LSP | 18.0 ⚡ | 89.0 ⚡ | 27.0 ⚡ |
+| Our LSP | 10.9 ⚡ | 26.6 ⚡ | 13.8 ⚡ |
 | solc | - | - | - |
 | nomicfoundation | FAIL | FAIL | FAIL |
 | juanfranblanco | FAIL | FAIL | FAIL |
@@ -15,7 +15,7 @@ Waits for valid publishDiagnostics before sending requests.
 
 ### Responses
 
-**Our LSP**  [diag: 4 in 410ms]
+**Our LSP**  [diag: 4 in 438ms]
 ```json
 {"range":{"end":{"character":8,"line":9},"start":{"character":8,"line":9}},"uri":"file:///Users/meek/developer/mmsaki/so...
 ```
@@ -41,4 +41,4 @@ FAIL: wait_for_diagnostics: timeout
 ```
 
 
-Our LSP 27.0ms, solc no result, nomicfoundation timeout, juanfranblanco timeout, qiuxiang timeout.
+Our LSP 13.8ms, solc no result, nomicfoundation timeout, juanfranblanco timeout, qiuxiang timeout.

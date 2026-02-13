@@ -15,12 +15,12 @@ Waits for valid publishDiagnostics before sending requests.
 
 ### Responses
 
-**Our LSP**  [diag: 4 in 414ms]
+**Our LSP**  [diag: 4 in 443ms]
 ```
 error: Method not found
 ```
 
-**solc**  [diag: 1 in 194ms]
+**solc**  [diag: 1 in 222ms]
 ```
 null
 ```

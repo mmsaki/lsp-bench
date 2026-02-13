@@ -7,7 +7,7 @@ Waits for valid publishDiagnostics before sending requests.
 
 | Server | p50 | p95 | mean |
 |--------|-----|-----|------|
-| Our LSP | 16.6 ⚡ | 38.1 ⚡ | 20.7 ⚡ |
+| Our LSP | 21.1 ⚡ | 124.1 ⚡ | 30.8 ⚡ |
 | solc | - | - | - |
 | nomicfoundation | FAIL | FAIL | FAIL |
 | juanfranblanco | FAIL | FAIL | FAIL |
@@ -15,12 +15,12 @@ Waits for valid publishDiagnostics before sending requests.
 
 ### Responses
 
-**Our LSP**  [diag: 4 in 433ms]
+**Our LSP**  [diag: 4 in 437ms]
 ```json
-[{"range":{"end":{"character":40,"line":354},"start":{"character":32,"line":354}},"uri":"file:///Users/meek/developer/mm...
+[{"range":{"end":{"character":16,"line":8},"start":{"character":8,"line":8}},"uri":"file:///Users/meek/developer/mmsaki/...
 ```
 
-**solc**  [diag: 1 in 133ms]
+**solc**  [diag: 1 in 136ms]
 ```
 error: Unknown method textDocument/references
 ```
@@ -41,4 +41,4 @@ FAIL: wait_for_diagnostics: timeout
 ```
 
 
-Our LSP 20.7ms, solc unsupported, nomicfoundation timeout, juanfranblanco timeout, qiuxiang timeout.
+Our LSP 30.8ms, solc unsupported, nomicfoundation timeout, juanfranblanco timeout, qiuxiang timeout.

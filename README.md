@@ -75,10 +75,22 @@ bench spawn definition      # Run specific benchmarks
 bench all -t 10             # Run all benchmarks with 10s timeout
 ```
 
+## Output
+
+Each run generates:
+
+- `results/<benchmark>.md` — detailed per-benchmark results
+- `results/README.md` — summary table with server versions and settings
+- `benchmarks/<date>.json` — machine-readable results with timestamps
+- `benchmarks/history.json` — append-only history of all runs
+
+The JSON output includes server versions, benchmark settings, and full p50/p95/mean data — useful for dashboards and tracking improvements over time.
+
 ## Methodology
 
-- 10 iterations + 2 warmup per server per benchmark
+- Configurable iterations and warmup per server per benchmark
 - Reports p50, p95, mean latency
+- Detects server versions automatically (`--version`, `package.json`)
 - Spawns each server as a child process, communicates via JSON-RPC over stdio
 - Waits for `publishDiagnostics` before sending feature requests
 - ⚡ marks the fastest server per benchmark
