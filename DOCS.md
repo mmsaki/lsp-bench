@@ -16,10 +16,10 @@ cargo build --release
 ./target/release/bench init       # generates benchmark.yaml
 ```
 
-Edit `benchmark.yaml` to add your servers, then:
+Edit `benchmark.yaml` to add your servers and choose which benchmarks to run, then:
 
 ```sh
-./target/release/bench all        # run all benchmarks
+./target/release/bench            # run benchmarks
 ./target/release/gen-readme       # generate README.md from results
 ```
 
@@ -41,22 +41,8 @@ Servers not found on `$PATH` are automatically skipped during benchmarks.
 
 | Command | Description |
 |---------|-------------|
-| `init` | Generate a `benchmark.yaml` template (won't overwrite existing) |
-| `all` | Run all benchmarks |
-| `spawn` | Spawn + initialize handshake |
-| `diagnostics` | Open file, time to first diagnostic |
-| `definition` | Go-to-definition at target position |
-| `declaration` | Go-to-declaration at target position |
-| `hover` | Hover at target position |
-| `references` | Find references at target position |
-| `documentSymbol` | Get document symbols |
-| `documentLink` | Get document links |
-
-Multiple benchmark commands can be combined:
-
-```sh
-bench spawn definition hover      # run these three benchmarks
-```
+| `bench` | Run benchmarks from config |
+| `bench init` | Generate a `benchmark.yaml` template (won't overwrite existing) |
 
 ## Configuration
 
@@ -89,6 +75,11 @@ iterations: 10
 warmup: 2
 timeout: 10        # seconds per request
 index_timeout: 15  # seconds for server to index/warm up
+output: benchmarks # directory for JSON results
+
+# Which benchmarks to run
+benchmarks:
+  - all
 
 # LSP servers to benchmark
 servers:
@@ -117,7 +108,30 @@ servers:
 | `warmup` | no | 2 | Number of warmup iterations (discarded) |
 | `timeout` | no | 10 | Timeout per LSP request in seconds |
 | `index_timeout` | no | 15 | Time for server to index/warm up in seconds |
+| `output` | no | `benchmarks` | Directory for JSON result files |
+| `benchmarks` | no | all | List of benchmarks to run (see below) |
 | `servers` | yes | -- | List of LSP servers to benchmark |
+
+### Selecting benchmarks
+
+The `benchmarks` field controls which benchmarks to run. Use `all` to run everything, or list specific ones:
+
+```yaml
+# Run all benchmarks
+benchmarks:
+  - all
+
+# Or pick specific ones
+benchmarks:
+  - spawn
+  - diagnostics
+  - definition
+  - hover
+```
+
+If omitted, all benchmarks are run.
+
+Valid benchmark names: `all`, `spawn`, `diagnostics`, `definition`, `declaration`, `hover`, `references`, `documentSymbol`, `documentLink`.
 
 ### Server fields
 
@@ -164,13 +178,16 @@ The position should land on an identifier that LSP methods can act on -- a type 
 
 ### Example configs
 
-**Minimal** -- benchmark a single server against the included Counter.sol:
+**Minimal** -- single server, just spawn and diagnostics:
 
 ```yaml
 project: examples
 file: Counter.sol
-line: 21   # "number" in setNumber (editor line 22, col 9)
+line: 21
 col: 8
+benchmarks:
+  - spawn
+  - diagnostics
 servers:
   - label: solc
     cmd: solc
@@ -188,12 +205,15 @@ iterations: 1
 warmup: 0
 timeout: 5
 index_timeout: 10
+benchmarks:
+  - spawn
+  - hover
 servers:
   - label: mmsaki
     cmd: solidity-language-server
 ```
 
-**Larger project** -- benchmark against Uniswap V4-core:
+**Full suite** -- all benchmarks against Uniswap V4-core:
 
 ```yaml
 project: v4-core
@@ -202,6 +222,8 @@ line: 102  # "TickMath" (editor line 103, col 16)
 col: 15
 iterations: 10
 warmup: 2
+benchmarks:
+  - all
 servers:
   - label: mmsaki
     cmd: solidity-language-server
@@ -219,6 +241,8 @@ line: 102
 col: 15
 timeout: 30
 index_timeout: 60
+benchmarks:
+  - all
 servers:
   - label: nomicfoundation
     description: Hardhat/Nomic Foundation Solidity Language Server
@@ -227,17 +251,18 @@ servers:
     args: ["--stdio"]
 ```
 
-### Using a config
+### Running benchmarks
 
 ```sh
-bench all                        # uses benchmark.yaml in current directory
-bench all -c pool.yaml           # uses a different config file
-bench all -c configs/fast.yaml   # config can be in any path
+bench                            # uses benchmark.yaml in current directory
+bench -c pool.yaml               # uses a different config file
+bench -c configs/fast.yaml       # config can be in any path
+bench -s solc -s mmsaki          # only run solc and mmsaki from config
 ```
 
 ### CLI overrides
 
-Any config value can be overridden from the command line. CLI flags take precedence over the config file.
+Some config values can be overridden from the command line. CLI flags take precedence over the config file.
 
 | Flag | Overrides |
 |------|-----------|
@@ -252,10 +277,9 @@ Any config value can be overridden from the command line. CLI flags take precede
 | `--col <N>` | `col` |
 
 ```sh
-bench all -n 1 -w 0             # override iterations/warmup from config
-bench all -s solc -s mmsaki      # only run solc and mmsaki from config
-bench all -T 30                  # give servers 30s to index (overrides config)
-bench hover -f src/PoolManager.sol --line 50 --col 8  # override file/position
+bench -n 1 -w 0                 # override iterations/warmup from config
+bench -s solc -s mmsaki          # only run solc and mmsaki from config
+bench -T 30                      # give servers 30s to index (overrides config)
 ```
 
 ## Methodology
@@ -322,12 +346,12 @@ After running benchmarks, generate the README from JSON data:
 
 ## Output
 
-`bench` produces JSON snapshots:
+`bench` produces JSON snapshots in the `output` directory (default `benchmarks/`):
 
-- `benchmarks/<timestamp>.json` -- full runs
-- `benchmarks/<names>/<timestamp>.json` -- partial runs (e.g. `benchmarks/diagnostics/`)
+- `<output>/<timestamp>.json` -- full runs
+- `<output>/<names>/<timestamp>.json` -- partial runs (e.g. `benchmarks/diagnostics/`)
 
-During a run, partial results are saved to `benchmarks/partial/` after each benchmark completes. These are cleaned up automatically when the full run finishes.
+During a run, partial results are saved to `<output>/partial/` after each benchmark completes. These are cleaned up automatically when the full run finishes.
 
 `gen-readme` reads a JSON snapshot and writes `README.md` with:
 - Summary results table with medals and trophy
