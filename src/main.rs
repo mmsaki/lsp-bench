@@ -439,7 +439,7 @@ struct Server {
 
 const SERVERS: &[Server] = &[
     Server {
-        label: "Our LSP",
+        label: "mmsaki",
         cmd: "solidity-language-server",
         args: &[],
     },
