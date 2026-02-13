@@ -28,11 +28,11 @@ Benchmarks comparing Solidity LSP servers against `examples` (`Counter.sol`).
 
 | Benchmark | mmsaki | solc 🏆 | nomicfoundation | juanfranblanco | qiuxiang |
 |-----------|--------|-----------|-----------------|----------------|----------|
-| [Spawn + Init](#spawn--init) | 5.00ms 🥇 | 110.50ms 🥉 | 860.40ms | 516.30ms | 68.90ms 🥈 |
-| [Diagnostics](#diagnostics) | 121.40ms 🥈 | 0.80ms 🥇 | 372.50ms | 809.90ms | 151.00ms 🥉 |
-| [Go to Definition](#go-to-definition) | 114.50ms | 0.10ms 🥇 | 0.30ms 🥈 | 0.30ms 🥉 | 0.30ms |
-| [Hover](#hover) | 114.50ms | 0.10ms 🥇 | 0.30ms 🥈 | 0.30ms 🥉 | - |
-| [Find References](#find-references) | 0.40ms 🥈 | unsupported | - | 0.90ms 🥉 | 0.30ms 🥇 |
+| [Spawn + Init](#spawn--init) | 4.10ms 🥇 | 110.50ms 🥉 | 853.40ms | 507.00ms | 66.00ms 🥈 |
+| [Diagnostics](#diagnostics) | 119.50ms 🥈 | 0.80ms 🥇 | 375.70ms | 801.30ms | 153.60ms 🥉 |
+| [Go to Definition](#go-to-definition) | 117.60ms | 0.10ms 🥇 | 0.30ms 🥈 | 0.40ms | 0.30ms 🥉 |
+| [Hover](#hover) | 116.00ms | 0.10ms 🥇 | 0.30ms 🥈 | 0.30ms 🥉 | - |
+| [Find References](#find-references) | 0.30ms 🥈 | unsupported | 0.30ms 🥉 | 0.60ms | 0.20ms 🥇 |
 
 > **🏆 Overall Winner: solc** — 3 🥇 out of 5 benchmarks
 
@@ -42,9 +42,9 @@ Benchmarks comparing Solidity LSP servers against `examples` (`Counter.sol`).
 |--------|------|----------|----------|-------|
 | **solc** 🏆 | 3 | 0 | 1 | 10 |
 | **mmsaki** | 1 | 2 | 0 | 7 |
-| **qiuxiang** | 1 | 1 | 1 | 6 |
-| **nomicfoundation** | 0 | 2 | 0 | 4 |
-| **juanfranblanco** | 0 | 0 | 3 | 3 |
+| **qiuxiang** | 1 | 1 | 2 | 7 |
+| **nomicfoundation** | 0 | 2 | 1 | 5 |
+| **juanfranblanco** | 0 | 0 | 1 | 1 |
 
 ## Feature Support
 
@@ -54,7 +54,7 @@ Benchmarks comparing Solidity LSP servers against `examples` (`Counter.sol`).
 | Diagnostics | yes | yes | yes | yes | yes |
 | Go to Definition | yes | yes | yes | yes | yes |
 | Hover | yes | yes | yes | yes | empty |
-| Find References | yes | no | empty | yes | yes |
+| Find References | yes | no | yes | yes | yes |
 
 > yes = supported   no = unsupported   timeout = server timed out   crash = server crashed   empty = returned null/empty
 
@@ -66,11 +66,11 @@ Benchmarks comparing Solidity LSP servers against `examples` (`Counter.sol`).
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | 🥇 | 5.00ms | 4.40ms | 11.20ms |
-| **solc** | 🥉 | 110.50ms | 110.00ms | 114.40ms |
-| **nomicfoundation** | ok | 860.40ms | 861.20ms | 880.20ms |
-| **juanfranblanco** | ok | 516.30ms | 515.20ms | 519.90ms |
-| **qiuxiang** | 🥈 | 68.90ms | 69.10ms | 70.30ms |
+| **mmsaki** | 🥇 | 4.10ms | 4.10ms | 4.60ms |
+| **solc** | 🥉 | 110.50ms | 112.40ms | 113.10ms |
+| **nomicfoundation** | ok | 853.40ms | 857.70ms | 874.80ms |
+| **juanfranblanco** | ok | 507.00ms | 506.40ms | 513.70ms |
+| **qiuxiang** | 🥈 | 66.00ms | 66.50ms | 67.60ms |
 
 <details>
 <summary>Response details</summary>
@@ -78,31 +78,31 @@ Benchmarks comparing Solidity LSP servers against `examples` (`Counter.sol`).
 **mmsaki**
 
 ```json
-"ok"
+ok
 ```
 
 **solc**
 
 ```json
-"ok"
+ok
 ```
 
 **nomicfoundation**
 
 ```json
-"ok"
+ok
 ```
 
 **juanfranblanco**
 
 ```json
-"ok"
+ok
 ```
 
 **qiuxiang**
 
 ```json
-"ok"
+ok
 ```
 
 </details>
@@ -111,11 +111,11 @@ Benchmarks comparing Solidity LSP servers against `examples` (`Counter.sol`).
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | 🥈 | 121.40ms | 120.90ms | 123.90ms |
-| **solc** | 🥇 | 0.80ms | 0.80ms | 0.90ms |
-| **nomicfoundation** | ok | 372.50ms | 372.20ms | 378.80ms |
-| **juanfranblanco** | ok | 809.90ms | 814.50ms | 836.40ms |
-| **qiuxiang** | 🥉 | 151.00ms | 151.60ms | 154.50ms |
+| **mmsaki** | 🥈 | 119.50ms | 118.50ms | 127.00ms |
+| **solc** | 🥇 | 0.80ms | 0.80ms | 0.80ms |
+| **nomicfoundation** | ok | 375.70ms | 374.90ms | 382.40ms |
+| **juanfranblanco** | ok | 801.30ms | 800.00ms | 872.70ms |
+| **qiuxiang** | 🥉 | 153.60ms | 153.70ms | 156.30ms |
 
 <details>
 <summary>Response details</summary>
@@ -195,11 +195,11 @@ Benchmarks comparing Solidity LSP servers against `examples` (`Counter.sol`).
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | ok | 114.50ms | 114.20ms | 117.40ms |
-| **solc** | 🥇 | 0.10ms | 0.10ms | 0.10ms |
-| **nomicfoundation** | 🥈 | 0.30ms | 0.30ms | 0.50ms |
-| **juanfranblanco** | 🥉 | 0.30ms | 0.30ms | 0.50ms |
-| **qiuxiang** | ok | 0.30ms | 0.30ms | 0.40ms |
+| **mmsaki** | ok | 117.60ms | 117.30ms | 122.10ms |
+| **solc** | 🥇 | 0.10ms | 0.10ms | 0.20ms |
+| **nomicfoundation** | 🥈 | 0.30ms | 0.40ms | 0.40ms |
+| **juanfranblanco** | ok | 0.40ms | 0.40ms | 0.40ms |
+| **qiuxiang** | 🥉 | 0.30ms | 0.20ms | 0.40ms |
 
 <details>
 <summary>Response details</summary>
@@ -292,10 +292,10 @@ Benchmarks comparing Solidity LSP servers against `examples` (`Counter.sol`).
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | ok | 114.50ms | 114.20ms | 116.90ms |
-| **solc** | 🥇 | 0.10ms | 0.10ms | 0.20ms |
-| **nomicfoundation** | 🥈 | 0.30ms | 0.30ms | 0.40ms |
-| **juanfranblanco** | 🥉 | 0.30ms | 0.30ms | 0.60ms |
+| **mmsaki** | ok | 116.00ms | 116.90ms | 121.20ms |
+| **solc** | 🥇 | 0.10ms | 0.00ms | 0.10ms |
+| **nomicfoundation** | 🥈 | 0.30ms | 0.30ms | 0.50ms |
+| **juanfranblanco** | 🥉 | 0.30ms | 0.30ms | 0.50ms |
 | **qiuxiang** | invalid | - | - | - |
 
 <details>
@@ -362,11 +362,11 @@ null
 
 | Server | Status | Mean | P50 | P95 |
 |--------|--------|------|-----|-----|
-| **mmsaki** | 🥈 | 0.40ms | 0.40ms | 0.40ms |
+| **mmsaki** | 🥈 | 0.30ms | 0.30ms | 0.40ms |
 | **solc** | invalid | - | - | - |
-| **nomicfoundation** | invalid | - | - | - |
-| **juanfranblanco** | 🥉 | 0.90ms | 0.60ms | 3.10ms |
-| **qiuxiang** | 🥇 | 0.30ms | 0.30ms | 0.40ms |
+| **nomicfoundation** | 🥉 | 0.30ms | 0.30ms | 0.40ms |
+| **juanfranblanco** | ok | 0.60ms | 0.60ms | 0.80ms |
+| **qiuxiang** | 🥇 | 0.20ms | 0.30ms | 0.30ms |
 
 <details>
 <summary>Response details</summary>
@@ -397,7 +397,18 @@ error: Unknown method textDocument/references
 **nomicfoundation**
 
 ```json
-null
+[
+  {
+    "range": {
+      "end": {
+        "character": 25,
+        "line": 9
+      },
+      "start": {
+        "character": 19,
+        "line": 9
+      }
+    },...
 ```
 
 **juanfranblanco**
@@ -438,6 +449,6 @@ null
 
 ---
 
-*Generated from [`benchmarks/counter/2026-02-13T07-55-04Z.json`](benchmarks/counter/2026-02-13T07-55-04Z.json) — benchmark run: 2026-02-13T07:55:04Z*
+*Generated from [`benchmarks/counter/2026-02-13T08-16-42Z.json`](benchmarks/counter/2026-02-13T08-16-42Z.json) — benchmark run: 2026-02-13T08:16:42Z*
 
 See [DOCS.md](./DOCS.md) for usage and installation.
