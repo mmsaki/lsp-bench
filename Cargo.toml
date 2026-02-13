@@ -8,5 +8,9 @@ publish = false
 name = "bench"
 path = "src/main.rs"
 
+[[bin]]
+name = "gen-readme"
+path = "src/gen_readme.rs"
+
 [dependencies]
 serde_json = "1"
