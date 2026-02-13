@@ -1,0 +1,31 @@
+{
+  "benchmarks": [
+    {
+      "name": "Spawn + Init",
+      "servers": [
+        {
+          "mean_ms": 110.6,
+          "p50_ms": 110.6,
+          "p95_ms": 110.6,
+          "response": "\"ok\"",
+          "server": "solc",
+          "status": "ok"
+        }
+      ]
+    }
+  ],
+  "date": "2026-02-12",
+  "servers": [
+    {
+      "name": "solc",
+      "version": "0.8.33+commit.64118f21.Darwin.appleclang"
+    }
+  ],
+  "settings": {
+    "index_timeout_secs": 15,
+    "iterations": 1,
+    "timeout_secs": 10,
+    "warmup": 0
+  },
+  "timestamp": "2026-02-13T04:00:19Z"
+}
