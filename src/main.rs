@@ -26,6 +26,10 @@ struct Config {
     timeout: u64,
     #[serde(default = "default_index_timeout")]
     index_timeout: u64,
+    #[serde(default = "default_output")]
+    output: String,
+    #[serde(default)]
+    benchmarks: Vec<String>,
     servers: Vec<ServerConfig>,
 }
 
@@ -58,6 +62,9 @@ fn default_timeout() -> u64 {
 }
 fn default_index_timeout() -> u64 {
     15
+}
+fn default_output() -> String {
+    "benchmarks".to_string()
 }
 
 fn load_config(path: &str) -> Config {
@@ -806,6 +813,7 @@ fn save_json(
     w: usize,
     timeout: &Duration,
     index_timeout: &Duration,
+    project: &str,
     bench_file: &str,
     target_line: u32,
     target_col: u32,
@@ -845,6 +853,7 @@ fn save_json(
             "warmup": w,
             "timeout_secs": timeout.as_secs(),
             "index_timeout_secs": index_timeout.as_secs(),
+            "project": project,
             "file": bench_file,
             "line": target_line,
             "col": target_col,
@@ -873,20 +882,15 @@ const ALL_BENCHMARKS: &[&str] = &[
 ];
 
 fn print_usage() {
-    eprintln!("Usage: bench [OPTIONS] <COMMAND>");
-    eprintln!();
-    eprintln!("Commands:");
-    eprintln!("  init                  Generate benchmark.yaml template");
-    eprintln!("  all, spawn, diagnostics, definition, declaration,");
-    eprintln!("  hover, references, documentSymbol, documentLink");
+    eprintln!("Usage: bench [OPTIONS]");
+    eprintln!("       bench init");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  -c, --config <PATH>   Config file (default: benchmark.yaml)");
     eprintln!("  -s, --server <NAME>   Filter servers (repeatable)");
     eprintln!("  -h, --help            Show this help");
     eprintln!();
-    eprintln!("All settings (iterations, timeouts, servers, file, position)");
-    eprintln!("are configured in benchmark.yaml. See DOCS.md for details.");
+    eprintln!("All settings are configured in benchmark.yaml. See DOCS.md for details.");
 }
 
 const EXAMPLE_CONFIG: &str = r#"# Solidity LSP Benchmark Configuration
@@ -915,6 +919,11 @@ iterations: 10    # number of measured iterations
 warmup: 2         # warmup iterations (discarded)
 timeout: 10       # seconds per LSP request
 index_timeout: 15 # seconds for server to index/warm up
+output: benchmarks # directory for JSON results
+
+# Which benchmarks to run (omit or use "all" to run everything)
+benchmarks:
+  - all
 
 # LSP servers to benchmark
 servers:
@@ -1041,7 +1050,12 @@ fn main() {
                     std::process::exit(1);
                 }));
             }
-            other => commands.push(other.to_string()),
+            "init" => commands.push("init".to_string()),
+            other => {
+                eprintln!("Error: unknown argument '{}'", other);
+                print_usage();
+                std::process::exit(1);
+            }
         }
         i += 1;
     }
@@ -1082,17 +1096,16 @@ fn main() {
     let index_timeout = Duration::from_secs(cfg.index_timeout);
     let target_line = cfg.line;
     let target_col = cfg.col;
+    let output_dir = cfg.output;
+    let partial_dir = format!("{}/partial", output_dir);
 
-    if commands.is_empty() {
-        print_usage();
-        std::process::exit(1);
-    }
-
-    let benchmarks: Vec<&str> = if commands.iter().any(|c| c == "all") {
-        ALL_BENCHMARKS.to_vec()
-    } else {
-        commands.iter().map(|s| s.as_str()).collect()
-    };
+    // Resolve which benchmarks to run from config
+    let benchmarks: Vec<&str> =
+        if cfg.benchmarks.is_empty() || cfg.benchmarks.iter().any(|c| c == "all") {
+            ALL_BENCHMARKS.to_vec()
+        } else {
+            cfg.benchmarks.iter().map(|s| s.as_str()).collect()
+        };
 
     for b in &benchmarks {
         if !ALL_BENCHMARKS.contains(b) {
@@ -1102,9 +1115,10 @@ fn main() {
         }
     }
 
-    let cwd = PathBuf::from(&cfg.project);
+    let project = cfg.project.clone();
+    let cwd = PathBuf::from(&project);
     if !cwd.exists() {
-        eprintln!("Error: project directory not found: {}", cfg.project);
+        eprintln!("Error: project directory not found: {}", project);
         std::process::exit(1);
     }
     let root = uri(&cwd);
@@ -1228,10 +1242,11 @@ fn main() {
             w,
             &timeout,
             &index_timeout,
+            &project,
             bench_file_rel,
             target_line,
             target_col,
-            "benchmarks/partial",
+            &partial_dir,
         );
         eprintln!("  {} {}", style("saved").dim(), style(&p).dim());
     }
@@ -1265,10 +1280,11 @@ fn main() {
             w,
             &timeout,
             &index_timeout,
+            &project,
             bench_file_rel,
             target_line,
             target_col,
-            "benchmarks/partial",
+            &partial_dir,
         );
         eprintln!("  {} {}", style("saved").dim(), style(&p).dim());
     }
@@ -1306,10 +1322,11 @@ fn main() {
                 w,
                 &timeout,
                 &index_timeout,
+                &project,
                 bench_file_rel,
                 target_line,
                 target_col,
-                "benchmarks/partial",
+                &partial_dir,
             );
             eprintln!("  {} {}", style("saved").dim(), style(&p).dim());
         }
@@ -1321,10 +1338,10 @@ fn main() {
         let is_full = benchmarks.len() == ALL_BENCHMARKS.len()
             && ALL_BENCHMARKS.iter().all(|b| benchmarks.contains(b));
         let dir = if is_full {
-            "benchmarks".to_string()
+            output_dir.clone()
         } else {
             let names: Vec<&str> = benchmarks.to_vec();
-            format!("benchmarks/{}", names.join("+"))
+            format!("{}/{}", output_dir, names.join("+"))
         };
         let path = save_json(
             &all_results,
@@ -1334,6 +1351,7 @@ fn main() {
             w,
             &timeout,
             &index_timeout,
+            &project,
             bench_file_rel,
             target_line,
             target_col,
@@ -1342,6 +1360,6 @@ fn main() {
         eprintln!("\n  {} {}", style("->").green().bold(), path);
 
         // Clean up partial saves — the final snapshot has everything
-        let _ = std::fs::remove_dir_all("benchmarks/partial");
+        let _ = std::fs::remove_dir_all(&partial_dir);
     }
 }

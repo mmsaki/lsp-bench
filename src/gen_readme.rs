@@ -7,13 +7,13 @@ fn main() {
 
     // Parse flags
     let mut json_path: Option<String> = None;
-    let mut output_path = "README.md".to_string();
+    let mut output_path: Option<String> = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
             "-o" | "--output" => {
                 if i + 1 < args.len() {
-                    output_path = args[i + 1].clone();
+                    output_path = Some(args[i + 1].clone());
                     i += 2;
                 } else {
                     eprintln!("Error: {} requires a path argument", args[i]);
@@ -21,13 +21,15 @@ fn main() {
                 }
             }
             "-h" | "--help" => {
-                eprintln!("Usage: gen-readme [OPTIONS] [path/to/benchmark.json]");
+                eprintln!("Usage: gen-readme [OPTIONS] [INPUT] [OUTPUT]");
+                eprintln!();
+                eprintln!("Arguments:");
+                eprintln!("  INPUT   Path to benchmark JSON (default: latest in benchmarks/)");
+                eprintln!("  OUTPUT  Output file path (default: README.md)");
                 eprintln!();
                 eprintln!("Options:");
-                eprintln!("  -o, --output <path>  Output file path (default: README.md)");
+                eprintln!("  -o, --output <path>  Same as OUTPUT positional argument");
                 eprintln!("  -h, --help           Show this help");
-                eprintln!();
-                eprintln!("If no JSON path is given, uses the latest file in benchmarks/");
                 std::process::exit(0);
             }
             _ => {
@@ -35,11 +37,19 @@ fn main() {
                     eprintln!("Unknown flag: {}", args[i]);
                     std::process::exit(1);
                 }
-                json_path = Some(args[i].clone());
+                if json_path.is_none() {
+                    json_path = Some(args[i].clone());
+                } else if output_path.is_none() {
+                    output_path = Some(args[i].clone());
+                } else {
+                    eprintln!("Unexpected argument: {}", args[i]);
+                    std::process::exit(1);
+                }
                 i += 1;
             }
         }
     }
+    let output_path = output_path.unwrap_or_else(|| "README.md".to_string());
 
     // Find the JSON file to use: explicit path or latest in benchmarks/
     let json_path = json_path.unwrap_or_else(|| {
@@ -76,11 +86,24 @@ fn generate_readme(data: &Value, json_path: &str) -> String {
     // ── Title ──────────────────────────────────────────────────────────
     l.push("# Solidity LSP Benchmarks".into());
     l.push(String::new());
-    l.push(
-        "Benchmarks comparing Solidity LSP servers against Uniswap V4-core \
-         (`Pool.sol`, 618 lines)."
-            .into(),
-    );
+
+    // Build subtitle from JSON settings
+    if let Some(settings) = data.get("settings") {
+        let project = settings
+            .get("project")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let file = settings
+            .get("file")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        l.push(format!(
+            "Benchmarks comparing Solidity LSP servers against `{}` (`{}`).",
+            project, file
+        ));
+    } else {
+        l.push("Benchmarks comparing Solidity LSP servers.".into());
+    }
     l.push(String::new());
 
     // ── Settings ───────────────────────────────────────────────────────
@@ -98,10 +121,14 @@ fn generate_readme(data: &Value, json_path: &str) -> String {
             .get("index_timeout_secs")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
+        let project = settings
+            .get("project")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         let file = settings
             .get("file")
             .and_then(|v| v.as_str())
-            .unwrap_or("src/libraries/Pool.sol");
+            .unwrap_or("unknown");
         let line = settings.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
         let col = settings.get("col").and_then(|v| v.as_u64()).unwrap_or(0);
 
@@ -109,6 +136,7 @@ fn generate_readme(data: &Value, json_path: &str) -> String {
         l.push(String::new());
         l.push("| Setting | Value |".into());
         l.push("|---------|-------|".into());
+        l.push(format!("| Project | `{}` |", project));
         l.push(format!("| File | `{}` |", file));
         l.push(format!("| Target position | line {}, col {} |", line, col));
         l.push(format!("| Iterations | {} |", iterations));
@@ -296,17 +324,19 @@ fn generate_readme(data: &Value, json_path: &str) -> String {
                             && response != "[]"
                             && !response.is_empty()
                         {
-                            "\u{2705}" // ✅
+                            "yes"
                         } else if response.contains("Unknown method")
                             || response.contains("unsupported")
                         {
-                            "\u{274C}" // ❌
-                        } else if error.contains("timeout") {
-                            "\u{23F3}" // ⏳
-                        } else if status == "ok" {
-                            "\u{26A0}\u{FE0F}" // ⚠️ (returned empty/null)
+                            "no"
+                        } else if error.contains("timeout")
+                            || error.contains("wait_for_diagnostics: timeout")
+                        {
+                            "timeout"
+                        } else if status == "ok" || status == "invalid" {
+                            "empty"
                         } else {
-                            "\u{274C}" // ❌
+                            "crash"
                         };
                         row.push_str(&format!(" {} |", icon));
                     }
@@ -315,10 +345,11 @@ fn generate_readme(data: &Value, json_path: &str) -> String {
             }
             l.push(String::new());
             l.push(
-                "> \u{2705} = valid response \u{2003} \
-                 \u{26A0}\u{FE0F} = empty/null result \u{2003} \
-                 \u{23F3} = timeout \u{2003} \
-                 \u{274C} = unsupported / failed"
+                "> yes = supported \u{2003} \
+                 no = unsupported \u{2003} \
+                 timeout = server timed out \u{2003} \
+                 crash = server crashed \u{2003} \
+                 empty = returned null/empty"
                     .into(),
             );
             l.push(String::new());
@@ -335,19 +366,51 @@ fn generate_readme(data: &Value, json_path: &str) -> String {
                 l.push(String::new());
 
                 if let Some(servers) = bench.get("servers").and_then(|s| s.as_array()) {
+                    // Rank ok servers by mean latency for medals
+                    let mut ranked: Vec<(usize, f64)> = servers
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, srv)| {
+                            let status = srv.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                            let mean = srv.get("mean_ms").and_then(|v| v.as_f64());
+                            if status == "ok" {
+                                mean.map(|m| (i, m))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    ranked.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                    let medals = [
+                        "\u{1F947}", // 🥇
+                        "\u{1F948}", // 🥈
+                        "\u{1F949}", // 🥉
+                    ];
+
                     // Latency table
                     l.push("| Server | Status | Mean | P50 | P95 |".into());
                     l.push("|--------|--------|------|-----|-----|".into());
-                    for srv in servers {
+                    for (i, srv) in servers.iter().enumerate() {
                         let name = srv.get("server").and_then(|v| v.as_str()).unwrap_or("?");
                         let status = srv.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                        let rank = ranked.iter().position(|(idx, _)| *idx == i);
                         let status_display = match status {
-                            "ok" => "\u{2705} ok".to_string(),
-                            "invalid" => "\u{26A0}\u{FE0F} invalid".to_string(),
+                            "ok" => {
+                                if let Some(pos) = rank {
+                                    if pos < medals.len() {
+                                        medals[pos].to_string()
+                                    } else {
+                                        "ok".to_string()
+                                    }
+                                } else {
+                                    "ok".to_string()
+                                }
+                            }
+                            "invalid" => "invalid".to_string(),
                             _ => {
                                 let err =
                                     srv.get("error").and_then(|v| v.as_str()).unwrap_or("fail");
-                                format!("\u{274C} {}", err)
+                                err.to_string()
                             }
                         };
                         let mean = format_ms(srv.get("mean_ms"));
@@ -492,7 +555,7 @@ fn format_summary_cell(
             } else {
                 format!(" {}", medal)
             };
-            format!(" {:.1}ms{} |", mean, suffix)
+            format!(" {:.2}ms{} |", mean, suffix)
         }
         "invalid" => {
             let response = srv.get("response").and_then(|v| v.as_str()).unwrap_or("");
@@ -527,7 +590,7 @@ fn truncate_response(s: &str, max_chars: usize) -> String {
 /// Format an optional millisecond value.
 fn format_ms(val: Option<&Value>) -> String {
     match val.and_then(|v| v.as_f64()) {
-        Some(ms) => format!("{:.1}ms", ms),
+        Some(ms) => format!("{:.2}ms", ms),
         None => "-".to_string(),
     }
 }

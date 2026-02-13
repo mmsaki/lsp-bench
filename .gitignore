@@ -1,3 +1,6 @@
 /target
 out
 cache
+soljson-latest.js
+counter.yaml
+counter/

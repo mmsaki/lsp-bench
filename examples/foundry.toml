@@ -1,0 +1,5 @@
+# Minimal foundry config to anchor forge's project root to this directory.
+# Without this, forge walks up the directory tree and produces source paths
+# that don't match the LSP's file URIs, causing definition/references to fail.
+[profile.default]
+src = "."
