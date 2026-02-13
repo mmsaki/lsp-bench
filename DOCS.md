@@ -86,8 +86,10 @@ output: benchmarks # directory for JSON results
 benchmarks:
   - all
 
-# Generate README after benchmarks (omit to skip)
-# readme: benchmarks/README.md
+# Generate READMEs after benchmarks (omit to skip)
+# readme:
+#   - benchmarks/README.md
+#   - README.md
 
 # LSP servers to benchmark
 servers:
@@ -118,7 +120,7 @@ servers:
 | `index_timeout` | no | 15 | Time for server to index/warm up in seconds |
 | `output` | no | `benchmarks` | Directory for JSON result files |
 | `benchmarks` | no | all | List of benchmarks to run (see below) |
-| `readme` | no | -- | Path to write generated README after benchmarks (omit to skip) |
+| `readme` | no | -- | List of paths to write generated READMEs after benchmarks (omit to skip) |
 | `servers` | yes | -- | List of LSP servers to benchmark |
 
 ### Selecting benchmarks
@@ -234,7 +236,9 @@ warmup: 2
 output: benchmarks/v4-core
 benchmarks:
   - all
-readme: benchmarks/v4-core/README.md
+readme:
+  - benchmarks/v4-core/README.md
+  - README.md
 servers:
   - label: mmsaki
     cmd: solidity-language-server
@@ -367,7 +371,7 @@ If you set the `readme` field in your config, `bench` will call `gen-readme` aut
 
 During a run, partial results are saved to `<output>/partial/` after each benchmark completes. These are cleaned up automatically when the full run finishes.
 
-If `readme` is set in the config, a README is automatically generated from the final JSON snapshot and written to the configured path.
+If `readme` is set in the config, READMEs are automatically generated from the final JSON snapshot and written to each configured path.
 
 `gen-readme` reads a JSON snapshot and writes `README.md` with:
 - Summary results table with medals and trophy
