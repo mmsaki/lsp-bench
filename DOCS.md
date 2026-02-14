@@ -337,30 +337,17 @@ servers:
 lsp-bench                            # uses benchmark.yaml in current directory
 lsp-bench -c pool.yaml               # uses a different config file
 lsp-bench -c configs/fast.yaml       # config can be in any path
-lsp-bench -s solc -s mmsaki          # only run solc and mmsaki from config
 ```
 
-### CLI overrides
+### CLI options
 
-Some config values can be overridden from the command line. CLI flags take precedence over the config file.
-
-| Flag | Overrides |
-|------|-----------|
+| Flag | Description |
+|------|-------------|
 | `-c, --config <PATH>` | Config file path (default: `benchmark.yaml`) |
-| `-n, --iterations <N>` | `iterations` |
-| `-w, --warmup <N>` | `warmup` |
-| `-t, --timeout <SECS>` | `timeout` |
-| `-T, --index-timeout <SECS>` | `index_timeout` |
-| `-s, --server <NAME>` | Filters `servers` list (substring match, repeatable) |
-| `-f, --file <PATH>` | `file` |
-| `--line <N>` | `line` |
-| `--col <N>` | `col` |
+| `-V, --version` | Show version (includes commit hash, OS, and architecture) |
+| `-h, --help` | Show help |
 
-```sh
-lsp-bench -n 1 -w 0                 # override iterations/warmup from config
-lsp-bench -s solc -s mmsaki          # only run solc and mmsaki from config
-lsp-bench -T 30                      # give servers 30s to index (overrides config)
-```
+All benchmark settings (iterations, warmup, timeout, servers, etc.) are configured in the YAML file.
 
 ## Methodology
 

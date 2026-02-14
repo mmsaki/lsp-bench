@@ -1,74 +1,34 @@
+use clap::Parser;
 use serde_json::Value;
 use std::path::Path;
 
+#[derive(Parser)]
+#[command(name = "gen-analysis", version = env!("LONG_VERSION"))]
+#[command(about = "Generate per-feature analysis report from benchmark JSON")]
+struct Cli {
+    /// Path to benchmark JSON (default: latest in benchmarks/)
+    input: Option<String>,
+
+    /// Output file path
+    #[arg(short, long, default_value = "ANALYSIS.md")]
+    output: String,
+
+    /// Server for head-to-head comparison (default: first server)
+    #[arg(long)]
+    base: Option<String>,
+
+    /// Don't print analysis to stdout
+    #[arg(short, long)]
+    quiet: bool,
+}
+
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let cli = Cli::parse();
+    let output_path = cli.output;
+    let lead_server = cli.base;
+    let quiet = cli.quiet;
 
-    let mut json_path: Option<String> = None;
-    let mut output_path: Option<String> = None;
-    let mut lead_server: Option<String> = None;
-    let mut quiet = false;
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "-o" | "--output" => {
-                if i + 1 < args.len() {
-                    output_path = Some(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    eprintln!("Error: {} requires a path argument", args[i]);
-                    std::process::exit(1);
-                }
-            }
-            "--base" => {
-                if i + 1 < args.len() {
-                    lead_server = Some(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    eprintln!("Error: {} requires a server name", args[i]);
-                    std::process::exit(1);
-                }
-            }
-            "-q" | "--quiet" => {
-                quiet = true;
-                i += 1;
-            }
-            "-h" | "--help" => {
-                eprintln!("Usage: gen-analysis [OPTIONS] [INPUT] [OUTPUT]");
-                eprintln!();
-                eprintln!("Generate analysis report from benchmark JSON.");
-                eprintln!();
-                eprintln!("Arguments:");
-                eprintln!("  INPUT   Path to benchmark JSON (default: latest in benchmarks/)");
-                eprintln!("  OUTPUT  Output file path (default: ANALYSIS.md)");
-                eprintln!();
-                eprintln!("Options:");
-                eprintln!("  -o, --output <path>    Same as OUTPUT positional argument");
-                eprintln!("  --base <server>        Server for head-to-head comparison (default: first server)");
-                eprintln!("  -q, --quiet            Don't print analysis to stdout");
-                eprintln!("  -h, --help             Show this help");
-                std::process::exit(0);
-            }
-            _ => {
-                if args[i].starts_with('-') {
-                    eprintln!("Unknown flag: {}", args[i]);
-                    std::process::exit(1);
-                }
-                if json_path.is_none() {
-                    json_path = Some(args[i].clone());
-                } else if output_path.is_none() {
-                    output_path = Some(args[i].clone());
-                } else {
-                    eprintln!("Unexpected argument: {}", args[i]);
-                    std::process::exit(1);
-                }
-                i += 1;
-            }
-        }
-    }
-    let output_path = output_path.unwrap_or_else(|| "ANALYSIS.md".to_string());
-
-    let json_path = match json_path {
+    let json_path = match cli.input {
         Some(p) if Path::new(&p).is_dir() => find_latest_json(&p).unwrap_or_else(|| {
             eprintln!("No JSON files found in {}/", p);
             std::process::exit(1);

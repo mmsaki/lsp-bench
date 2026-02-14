@@ -99,22 +99,17 @@ servers:
 ```sh
 lsp-bench                            # uses benchmark.yaml
 lsp-bench -c my-config.yaml          # custom config
-lsp-bench -s my-server               # filter to one server
-lsp-bench -n 1 -w 0 -s my-server    # quick single iteration
-lsp-bench -T 30                      # 30s index timeout
+lsp-bench init                       # generate a benchmark.yaml template
+lsp-bench --version                  # show version with commit hash
 ```
 
 | Flag | Description |
 |------|-------------|
 | `-c, --config <PATH>` | Config file (default: `benchmark.yaml`) |
-| `-n, --iterations <N>` | Override iterations |
-| `-w, --warmup <N>` | Override warmup |
-| `-t, --timeout <SECS>` | Override request timeout |
-| `-T, --index-timeout <SECS>` | Override index timeout |
-| `-s, --server <NAME>` | Filter servers (repeatable) |
-| `-f, --file <PATH>` | Override target file |
-| `--line <N>` | Override target line |
-| `--col <N>` | Override target column |
+| `-V, --version` | Show version (includes commit hash, OS, arch) |
+| `-h, --help` | Show help |
+
+All benchmark settings are configured in the YAML file.
 
 ## Binaries
 

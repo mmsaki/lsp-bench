@@ -1,0 +1,78 @@
+# LSP Benchmark Configuration
+# See DOCS.md for details on all fields
+
+# Project root containing the source files
+project: examples
+
+# Target file to benchmark (relative to project root)
+file: Counter.sol
+
+# Target position for position-based benchmarks (0-based)
+# These use LSP protocol indexing, so subtract 1 from your editor's
+# line and column numbers. For example, editor line 22 col 9 -> line: 21, col: 8
+#
+#   line 22 (editor):       number = newNumber;
+#   col   9 (editor):       ^
+#
+# The position should land on an identifier (variable, function, type)
+# that LSP methods can act on (definition, hover, references, etc.)
+line: 21
+col: 8
+
+# Benchmark settings
+iterations: 10    # number of measured iterations
+warmup: 2         # warmup iterations (discarded)
+timeout: 10       # seconds per LSP request
+index_timeout: 15 # seconds for server to index/warm up
+output: benchmarks # directory for JSON results
+
+# Which benchmarks to run (omit or use "all" to run everything)
+# Uses official LSP method names:
+#   initialize, textDocument/diagnostic, textDocument/definition,
+#   textDocument/declaration, textDocument/typeDefinition,
+#   textDocument/implementation, textDocument/hover,
+#   textDocument/references, textDocument/completion,
+#   textDocument/signatureHelp, textDocument/rename,
+#   textDocument/prepareRename, textDocument/documentSymbol,
+#   textDocument/documentLink, textDocument/formatting,
+#   textDocument/foldingRange, textDocument/selectionRange,
+#   textDocument/codeLens, textDocument/inlayHint,
+#   textDocument/semanticTokens/full, textDocument/documentColor,
+#   workspace/symbol
+benchmarks:
+  - all
+
+# Generate a report after benchmarks (omit to skip)
+# report: REPORT.md
+# report_style: delta    # delta (default), readme, or analysis
+
+# Response output (default: 80)
+#   full     -> store full response, no truncation
+#   <number> -> truncate to that many chars
+# response: full
+
+# LSP servers to benchmark
+servers:
+  - label: my-server
+    description: My Language Server
+    link: https://github.com/example/my-server
+    cmd: my-language-server
+    args: []
+
+  # Build from a specific git ref (branch, tag, or SHA).
+  # lsp-bench will checkout the ref, cargo build --release, and use the
+  # built binary. The repo is restored to its original ref afterward.
+  # - label: baseline
+  #   cmd: my-language-server
+  #   commit: main
+  #   repo: /path/to/my-language-server
+  # - label: my-branch
+  #   cmd: my-language-server
+  #   commit: fix/my-feature
+  #   repo: /path/to/my-language-server
+
+  # - label: other-server
+  #   description: Another LSP server
+  #   link: https://github.com/example/other-server
+  #   cmd: other-lsp
+  #   args: ["--stdio"]

@@ -1,85 +1,39 @@
+use clap::Parser;
 use serde_json::Value;
 use std::path::Path;
 
+#[derive(Parser)]
+#[command(name = "gen-delta", version = env!("LONG_VERSION"))]
+#[command(about = "Generate compact delta comparison table from benchmark JSON")]
+struct Cli {
+    /// Path to benchmark JSON (default: latest in benchmarks/)
+    input: Option<String>,
+
+    /// Write table to file (default: stdout only)
+    #[arg(short, long)]
+    output: Option<String>,
+
+    /// Baseline server (default: first server)
+    #[arg(long)]
+    base: Option<String>,
+
+    /// Head server to compare (default: second server)
+    #[arg(long)]
+    head: Option<String>,
+
+    /// Don't print table to stdout
+    #[arg(short, long)]
+    quiet: bool,
+}
+
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let cli = Cli::parse();
+    let output_path = cli.output;
+    let base_server = cli.base;
+    let head_server = cli.head;
+    let quiet = cli.quiet;
 
-    let mut json_path: Option<String> = None;
-    let mut output_path: Option<String> = None;
-    let mut base_server: Option<String> = None;
-    let mut head_server: Option<String> = None;
-    let mut quiet = false;
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "-o" | "--output" => {
-                if i + 1 < args.len() {
-                    output_path = Some(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    eprintln!("Error: {} requires a path argument", args[i]);
-                    std::process::exit(1);
-                }
-            }
-            "--base" => {
-                if i + 1 < args.len() {
-                    base_server = Some(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    eprintln!("Error: {} requires a server name", args[i]);
-                    std::process::exit(1);
-                }
-            }
-            "--head" => {
-                if i + 1 < args.len() {
-                    head_server = Some(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    eprintln!("Error: {} requires a server name", args[i]);
-                    std::process::exit(1);
-                }
-            }
-            "-q" | "--quiet" => {
-                quiet = true;
-                i += 1;
-            }
-            "-h" | "--help" => {
-                eprintln!("Usage: gen-delta [OPTIONS] [INPUT]");
-                eprintln!();
-                eprintln!("Generate compact delta comparison table from benchmark JSON.");
-                eprintln!();
-                eprintln!("Arguments:");
-                eprintln!("  INPUT   Path to benchmark JSON (default: latest in benchmarks/)");
-                eprintln!();
-                eprintln!("Options:");
-                eprintln!("  -o, --output <path>    Write table to file (default: stdout only)");
-                eprintln!("  --base <server>        Baseline server (default: first server)");
-                eprintln!(
-                    "  --head <server>        Head server to compare (default: second server)"
-                );
-                eprintln!("  -q, --quiet            Don't print table to stdout");
-                eprintln!("  -h, --help             Show this help");
-                std::process::exit(0);
-            }
-            _ => {
-                if args[i].starts_with('-') {
-                    eprintln!("Unknown flag: {}", args[i]);
-                    std::process::exit(1);
-                }
-                if json_path.is_none() {
-                    json_path = Some(args[i].clone());
-                } else if output_path.is_none() {
-                    output_path = Some(args[i].clone());
-                } else {
-                    eprintln!("Unexpected argument: {}", args[i]);
-                    std::process::exit(1);
-                }
-                i += 1;
-            }
-        }
-    }
-
-    let json_path = match json_path {
+    let json_path = match cli.input {
         Some(p) if Path::new(&p).is_dir() => find_latest_json(&p).unwrap_or_else(|| {
             eprintln!("No JSON files found in {}/", p);
             std::process::exit(1);

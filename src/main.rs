@@ -1,3 +1,4 @@
+use clap::{Parser, Subcommand};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
@@ -158,8 +159,6 @@ struct LspClient {
     rx: mpsc::Receiver<Value>,
     writer: std::process::ChildStdin,
     id: i64,
-    #[allow(dead_code)]
-    logs: Vec<String>,
 }
 
 struct DiagnosticsInfo {
@@ -238,7 +237,6 @@ impl LspClient {
             rx,
             writer,
             id: 1,
-            logs: Vec::new(),
         })
     }
 
@@ -284,15 +282,6 @@ impl LspClient {
                 return Err("timeout".into());
             }
             let msg = self.recv(remaining)?;
-            if msg.get("method").and_then(|m| m.as_str()) == Some("window/logMessage") {
-                if let Some(text) = msg
-                    .get("params")
-                    .and_then(|p| p.get("message"))
-                    .and_then(|m| m.as_str())
-                {
-                    self.logs.push(text.to_string());
-                }
-            }
             if msg.get("id").is_some() {
                 return Ok(msg);
             }
@@ -314,15 +303,6 @@ impl LspClient {
                 };
             }
             let msg = self.recv(remaining)?;
-            if msg.get("method").and_then(|m| m.as_str()) == Some("window/logMessage") {
-                if let Some(text) = msg
-                    .get("params")
-                    .and_then(|p| p.get("message"))
-                    .and_then(|m| m.as_str())
-                {
-                    self.logs.push(text.to_string());
-                }
-            }
             if msg.get("method").and_then(|m| m.as_str()) == Some("textDocument/publishDiagnostics")
             {
                 let count = msg
@@ -651,10 +631,6 @@ fn response_summary(resp: &Value, max_chars: usize) -> String {
     }
 }
 
-// ── Servers (alias for config) ──────────────────────────────────────────────
-
-type Server = ServerConfig;
-
 // ── Memory measurement ──────────────────────────────────────────────────────
 
 /// Get the resident set size (RSS) of a process in kilobytes.
@@ -791,7 +767,7 @@ fn iter_msg(i: usize, w: usize, n: usize) -> String {
 
 /// Benchmark that spawns a fresh server each iteration (e.g. spawn+init).
 fn bench_spawn(
-    srv: &Server,
+    srv: &ServerConfig,
     root: &str,
     cwd: &Path,
     w: usize,
@@ -832,7 +808,7 @@ fn bench_spawn(
 
 /// Benchmark that spawns fresh each iteration, measures didOpen -> diagnostics.
 fn bench_diagnostics(
-    srv: &Server,
+    srv: &ServerConfig,
     root: &str,
     cwd: &Path,
     target_file: &Path,
@@ -901,7 +877,7 @@ fn bench_diagnostics(
 /// Benchmark an LSP method on a single persistent server session.
 /// Spawns once, waits for diagnostics, then iterates the given method.
 fn bench_lsp_method(
-    srv: &Server,
+    srv: &ServerConfig,
     root: &str,
     cwd: &Path,
     target_file: &Path,
@@ -984,9 +960,9 @@ fn bench_lsp_method(
 }
 
 /// Run a benchmark across all servers, showing a spinner per server.
-fn run_bench<F>(servers: &[&Server], response_limit: usize, f: F) -> Vec<BenchRow>
+fn run_bench<F>(servers: &[&ServerConfig], response_limit: usize, f: F) -> Vec<BenchRow>
 where
-    F: Fn(&Server, &dyn Fn(&str)) -> BenchResult,
+    F: Fn(&ServerConfig, &dyn Fn(&str)) -> BenchResult,
 {
     let mut rows = Vec::new();
     for srv in servers {
@@ -1142,100 +1118,31 @@ const ALL_BENCHMARKS: &[&str] = &[
     "workspace/symbol",
 ];
 
-fn print_usage() {
-    eprintln!("lsp-bench {}", env!("LONG_VERSION"));
-    eprintln!();
-    eprintln!("Usage: lsp-bench [OPTIONS]");
-    eprintln!("       lsp-bench init");
-    eprintln!();
-    eprintln!("Options:");
-    eprintln!("  -c, --config <PATH>   Config file (default: benchmark.yaml)");
-    eprintln!("  -s, --server <NAME>   Filter servers (repeatable)");
-    eprintln!("  -V, --version         Show version");
-    eprintln!("  -h, --help            Show this help");
-    eprintln!();
-    eprintln!("All settings are configured in benchmark.yaml. See DOCS.md for details.");
+// ── CLI ─────────────────────────────────────────────────────────────────────
+
+#[derive(Parser)]
+#[command(name = "lsp-bench", version = env!("LONG_VERSION"))]
+#[command(about = "Benchmark framework for LSP servers")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Config file path
+    #[arg(short, long, default_value = "benchmark.yaml")]
+    config: String,
 }
 
-const EXAMPLE_CONFIG: &str = r#"# Solidity LSP Benchmark Configuration
-# See DOCS.md for details on all fields
+#[derive(Subcommand)]
+enum Commands {
+    /// Generate a benchmark.yaml template
+    Init {
+        /// Output path for the generated config
+        #[arg(short, long, default_value = "benchmark.yaml")]
+        config: Option<String>,
+    },
+}
 
-# Project root containing the Solidity files
-project: examples
-
-# Target file to benchmark (relative to project root)
-file: Counter.sol
-
-# Target position for position-based benchmarks (0-based)
-# These use LSP protocol indexing, so subtract 1 from your editor's
-# line and column numbers. For example, editor line 22 col 9 -> line: 21, col: 8
-#
-#   line 22 (editor):       number = newNumber;
-#   col   9 (editor):       ^
-#
-# The position should land on an identifier (variable, function, type)
-# that LSP methods can act on (definition, hover, references, etc.)
-line: 21
-col: 8
-
-# Benchmark settings
-iterations: 10    # number of measured iterations
-warmup: 2         # warmup iterations (discarded)
-timeout: 10       # seconds per LSP request
-index_timeout: 15 # seconds for server to index/warm up
-output: benchmarks # directory for JSON results
-
-# Which benchmarks to run (omit or use "all" to run everything)
-# Uses official LSP method names:
-#   initialize, textDocument/diagnostic, textDocument/definition,
-#   textDocument/declaration, textDocument/typeDefinition,
-#   textDocument/implementation, textDocument/hover,
-#   textDocument/references, textDocument/completion,
-#   textDocument/signatureHelp, textDocument/rename,
-#   textDocument/prepareRename, textDocument/documentSymbol,
-#   textDocument/documentLink, textDocument/formatting,
-#   textDocument/foldingRange, textDocument/selectionRange,
-#   textDocument/codeLens, textDocument/inlayHint,
-#   textDocument/semanticTokens/full, textDocument/documentColor,
-#   workspace/symbol
-benchmarks:
-  - all
-
-# Generate a report after benchmarks (omit to skip)
-# report: REPORT.md
-# report_style: delta    # delta (default), readme, or analysis
-
-# Response output (default: 80)
-#   full     -> store full response, no truncation
-#   <number> -> truncate to that many chars
-# response: full
-
-# LSP servers to benchmark
-servers:
-  - label: my-server
-    description: My Solidity Language Server
-    link: https://github.com/example/my-server
-    cmd: my-solidity-lsp
-    args: []
-
-  # Build from a specific git ref (branch, tag, or SHA).
-  # lsp-bench will checkout the ref, cargo build --release, and use the
-  # built binary. The repo is restored to its original ref afterward.
-  # - label: baseline
-  #   cmd: solidity-language-server
-  #   commit: main
-  #   repo: /path/to/solidity-language-server
-  # - label: my-branch
-  #   cmd: solidity-language-server
-  #   commit: fix/my-feature
-  #   repo: /path/to/solidity-language-server
-
-  # - label: solc
-  #   description: Official Solidity compiler LSP
-  #   link: https://docs.soliditylang.org
-  #   cmd: solc
-  #   args: ["--lsp"]
-"#;
+const EXAMPLE_CONFIG: &str = include_str!("../examples/benchmark.template.yaml");
 
 fn init_config(path: &str) {
     if Path::new(path).exists() {
@@ -1249,147 +1156,21 @@ fn init_config(path: &str) {
     eprintln!("Created {}", path);
     eprintln!();
     eprintln!("Edit the file to configure your servers, then run:");
-    eprintln!("  lsp-bench all");
+    eprintln!("  lsp-bench");
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let cli = Cli::parse();
 
-    let mut config_path = "benchmark.yaml".to_string();
-    let mut commands: Vec<String> = Vec::new();
-    let mut server_filter: Vec<String> = Vec::new();
-
-    // CLI overrides (None = use config value)
-    let mut cli_n: Option<usize> = None;
-    let mut cli_w: Option<usize> = None;
-    let mut cli_timeout: Option<u64> = None;
-    let mut cli_index_timeout: Option<u64> = None;
-    let mut cli_file: Option<String> = None;
-    let mut cli_line: Option<u32> = None;
-    let mut cli_col: Option<u32> = None;
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "-V" | "--version" => {
-                eprintln!("lsp-bench {}", env!("LONG_VERSION"));
-                std::process::exit(0);
-            }
-            "-h" | "--help" => {
-                print_usage();
-                std::process::exit(0);
-            }
-            "-c" | "--config" => {
-                i += 1;
-                config_path = args
-                    .get(i)
-                    .unwrap_or_else(|| {
-                        eprintln!("Error: -c requires a path");
-                        std::process::exit(1);
-                    })
-                    .clone();
-            }
-            "-n" | "--iterations" => {
-                i += 1;
-                cli_n = Some(args.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
-                    eprintln!("Error: -n requires a number");
-                    std::process::exit(1);
-                }));
-            }
-            "-w" | "--warmup" => {
-                i += 1;
-                cli_w = Some(args.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
-                    eprintln!("Error: -w requires a number");
-                    std::process::exit(1);
-                }));
-            }
-            "-t" | "--timeout" => {
-                i += 1;
-                cli_timeout = Some(args.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
-                    eprintln!("Error: -t requires a number (seconds)");
-                    std::process::exit(1);
-                }));
-            }
-            "-T" | "--index-timeout" => {
-                i += 1;
-                cli_index_timeout =
-                    Some(args.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
-                        eprintln!("Error: -T requires a number (seconds)");
-                        std::process::exit(1);
-                    }));
-            }
-            "-s" | "--server" => {
-                i += 1;
-                let name = args.get(i).unwrap_or_else(|| {
-                    eprintln!("Error: -s requires a server name");
-                    std::process::exit(1);
-                });
-                server_filter.push(name.to_lowercase());
-            }
-            "-f" | "--file" => {
-                i += 1;
-                cli_file = Some(
-                    args.get(i)
-                        .unwrap_or_else(|| {
-                            eprintln!("Error: -f requires a file path");
-                            std::process::exit(1);
-                        })
-                        .clone(),
-                );
-            }
-            "--line" => {
-                i += 1;
-                cli_line = Some(args.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
-                    eprintln!("Error: --line requires a number");
-                    std::process::exit(1);
-                }));
-            }
-            "--col" => {
-                i += 1;
-                cli_col = Some(args.get(i).and_then(|v| v.parse().ok()).unwrap_or_else(|| {
-                    eprintln!("Error: --col requires a number");
-                    std::process::exit(1);
-                }));
-            }
-            "init" => commands.push("init".to_string()),
-            other => {
-                eprintln!("Error: unknown argument '{}'", other);
-                print_usage();
-                std::process::exit(1);
-            }
-        }
-        i += 1;
-    }
-
-    // Handle init before loading config
-    if commands.iter().any(|c| c == "init") {
-        init_config(&config_path);
+    // Handle init subcommand before loading config
+    if let Some(Commands::Init { config }) = cli.command {
+        let path = config.as_deref().unwrap_or(&cli.config);
+        init_config(path);
         std::process::exit(0);
     }
 
-    // Load config, apply CLI overrides
-    let mut cfg = load_config(&config_path);
-    if let Some(v) = cli_n {
-        cfg.iterations = v;
-    }
-    if let Some(v) = cli_w {
-        cfg.warmup = v;
-    }
-    if let Some(v) = cli_timeout {
-        cfg.timeout = v;
-    }
-    if let Some(v) = cli_index_timeout {
-        cfg.index_timeout = v;
-    }
-    if let Some(v) = cli_file {
-        cfg.file = v;
-    }
-    if let Some(v) = cli_line {
-        cfg.line = v;
-    }
-    if let Some(v) = cli_col {
-        cfg.col = v;
-    }
+    // Load config
+    let mut cfg = load_config(&cli.config);
 
     let n = cfg.iterations;
     let w = cfg.warmup;
@@ -1413,8 +1194,10 @@ fn main() {
 
     for b in &benchmarks {
         if !ALL_BENCHMARKS.contains(b) {
-            eprintln!("Error: unknown benchmark '{}'", b);
-            print_usage();
+            eprintln!(
+                "Error: unknown benchmark '{}'. See DOCS.md for valid names.",
+                b
+            );
             std::process::exit(1);
         }
     }
@@ -1433,7 +1216,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    eprintln!("  {} {}", style("config").dim(), config_path);
+    eprintln!("  {} {}", style("config").dim(), cli.config);
     eprintln!(
         "  {} {}  (line {}, col {})",
         style("file").dim(),
@@ -1462,17 +1245,10 @@ fn main() {
         }
     }
 
-    let avail: Vec<&Server> = cfg
+    let avail: Vec<&ServerConfig> = cfg
         .servers
         .iter()
         .filter(|s| {
-            if !server_filter.is_empty()
-                && !server_filter
-                    .iter()
-                    .any(|f| s.label.to_lowercase().contains(f))
-            {
-                return false;
-            }
             let ok = available(&s.cmd);
             if !ok {
                 eprintln!("  {} {} -- not found", style("skip").yellow(), s.label);
