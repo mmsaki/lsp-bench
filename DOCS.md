@@ -4,7 +4,7 @@ This project produces four binaries:
 
 | Binary | Source | Purpose |
 |--------|--------|---------|
-| `bench` | `src/main.rs` | Run LSP benchmarks, produce JSON snapshots |
+| `lsp-bench` | `src/main.rs` | Run LSP benchmarks, produce JSON snapshots |
 | `gen-readme` | `src/gen_readme.rs` | Read a JSON snapshot, generate `README.md` |
 | `gen-analysis` | `src/gen_analysis.rs` | Read a JSON snapshot, generate analysis report |
 | `gen-delta` | `src/gen_delta.rs` | Read a JSON snapshot, generate compact delta comparison table |
@@ -15,13 +15,13 @@ This project produces four binaries:
 git clone --recursive https://github.com/mmsaki/solidity-lsp-benchmarks.git
 cd solidity-lsp-benchmarks
 cargo build --release
-./target/release/bench init       # generates benchmark.yaml
+./target/release/lsp-bench init       # generates benchmark.yaml
 ```
 
 Edit `benchmark.yaml` to add your servers and choose which benchmarks to run, then:
 
 ```sh
-./target/release/bench            # run benchmarks (generates README if configured)
+./target/release/lsp-bench            # run benchmarks (generates README if configured)
 ```
 
 To generate a README manually from a specific JSON snapshot:
@@ -48,18 +48,18 @@ Servers not found on `$PATH` are automatically skipped during benchmarks.
 
 | Command | Description |
 |---------|-------------|
-| `bench` | Run benchmarks from config |
-| `bench init` | Generate a `benchmark.yaml` template (won't overwrite existing) |
+| `lsp-bench` | Run benchmarks from config |
+| `lsp-bench init` | Generate a `benchmark.yaml` template (won't overwrite existing) |
 
 ## Configuration
 
-Benchmarks are configured via a YAML file. By default, `bench` looks for `benchmark.yaml` in the current directory. Use `-c` to point to a different config.
+Benchmarks are configured via a YAML file. By default, `lsp-bench` looks for `benchmark.yaml` in the current directory. Use `-c` to point to a different config.
 
 ### Generating a config
 
 ```sh
-bench init                        # creates benchmark.yaml
-bench init -c my-bench.yaml       # creates at a custom path
+lsp-bench init                        # creates benchmark.yaml
+lsp-bench init -c my-bench.yaml       # creates at a custom path
 ```
 
 This writes a commented template targeting `examples/Counter.sol` with placeholder server entries. Edit it to add your servers and (optionally) point to a different project/file.
@@ -177,7 +177,7 @@ This affects both the per-iteration `response` field in JSON output and the top-
 
 ### Building from commit
 
-When `commit` is set on a server, `bench` will:
+When `commit` is set on a server, `lsp-bench` will:
 
 1. `git checkout <commit>` in the `repo` directory
 2. `cargo build --release`
@@ -199,7 +199,7 @@ servers:
     repo: /path/to/solidity-language-server
 ```
 
-The `cmd` field is used as the binary name inside `target/release/`. The `repo` field must point to a Rust project with a `Cargo.toml`. Both servers can share the same repo — `bench` builds them sequentially and restores the original ref after each build.
+The `cmd` field is used as the binary name inside `target/release/`. The `repo` field must point to a Rust project with a `Cargo.toml`. Both servers can share the same repo — `lsp-bench` builds them sequentially and restores the original ref after each build.
 
 ### Target position (line and col)
 
@@ -334,10 +334,10 @@ servers:
 ### Running benchmarks
 
 ```sh
-bench                            # uses benchmark.yaml in current directory
-bench -c pool.yaml               # uses a different config file
-bench -c configs/fast.yaml       # config can be in any path
-bench -s solc -s mmsaki          # only run solc and mmsaki from config
+lsp-bench                            # uses benchmark.yaml in current directory
+lsp-bench -c pool.yaml               # uses a different config file
+lsp-bench -c configs/fast.yaml       # config can be in any path
+lsp-bench -s solc -s mmsaki          # only run solc and mmsaki from config
 ```
 
 ### CLI overrides
@@ -357,9 +357,9 @@ Some config values can be overridden from the command line. CLI flags take prece
 | `--col <N>` | `col` |
 
 ```sh
-bench -n 1 -w 0                 # override iterations/warmup from config
-bench -s solc -s mmsaki          # only run solc and mmsaki from config
-bench -T 30                      # give servers 30s to index (overrides config)
+lsp-bench -n 1 -w 0                 # override iterations/warmup from config
+lsp-bench -s solc -s mmsaki          # only run solc and mmsaki from config
+lsp-bench -T 30                      # give servers 30s to index (overrides config)
 ```
 
 ## Methodology
@@ -524,7 +524,7 @@ Delta is the default `report_style`. To auto-generate after benchmarks, just set
 
 ## Output
 
-`bench` produces JSON snapshots in the `output` directory (default `benchmarks/`):
+`lsp-bench` produces JSON snapshots in the `output` directory (default `benchmarks/`):
 
 - `<output>/<timestamp>.json` -- all runs go to the same directory
 
@@ -578,6 +578,6 @@ The per-iteration data enables warmup curve analysis, response consistency check
 
 The repo includes test resources in `examples/`:
 
-- **`examples/Counter.sol`** -- A simple Solidity contract with NatSpec doc comments and intentional unused variables (`unused`, `owner`, `old`, `temp`) that trigger diagnostics warnings from LSP servers. Used as the default benchmark target by `bench init`.
+- **`examples/Counter.sol`** -- A simple Solidity contract with NatSpec doc comments and intentional unused variables (`unused`, `owner`, `old`, `temp`) that trigger diagnostics warnings from LSP servers. Used as the default benchmark target by `lsp-bench init`.
 
 For larger benchmarks, the repo also includes [Uniswap V4-core](https://github.com/Uniswap/v4-core) as a git submodule at `v4-core/` (618-line `Pool.sol`). Clone with `--recursive` to include it.

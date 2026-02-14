@@ -1126,8 +1126,8 @@ const ALL_BENCHMARKS: &[&str] = &[
 ];
 
 fn print_usage() {
-    eprintln!("Usage: bench [OPTIONS]");
-    eprintln!("       bench init");
+    eprintln!("Usage: lsp-bench [OPTIONS]");
+    eprintln!("       lsp-bench init");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  -c, --config <PATH>   Config file (default: benchmark.yaml)");
@@ -1191,7 +1191,7 @@ servers:
     args: []
 
   # Build from a specific git ref (branch, tag, or SHA).
-  # bench will checkout the ref, cargo build --release, and use the
+  # lsp-bench will checkout the ref, cargo build --release, and use the
   # built binary. The repo is restored to its original ref afterward.
   # - label: baseline
   #   cmd: solidity-language-server
@@ -1221,7 +1221,7 @@ fn init_config(path: &str) {
     eprintln!("Created {}", path);
     eprintln!();
     eprintln!("Edit the file to configure your servers, then run:");
-    eprintln!("  bench all");
+    eprintln!("  lsp-bench all");
 }
 
 fn main() {

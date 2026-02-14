@@ -1,11 +1,11 @@
 [package]
-name = "solidity-lsp-bench"
-version = "0.1.0"
+name = "lsp-bench"
+version = "0.1.1"
 edition = "2021"
 publish = false
 
 [[bin]]
-name = "bench"
+name = "lsp-bench"
 path = "src/main.rs"
 
 [[bin]]

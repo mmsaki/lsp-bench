@@ -292,9 +292,9 @@ This isn't just a leaderboard. It's a diagnostic tool.
 git clone --recursive https://github.com/mmsaki/solidity-lsp-benchmarks
 cd solidity-lsp-benchmarks
 cargo build --release
-./target/release/bench init
+./target/release/lsp-bench init
 # edit benchmark.yaml with your project and servers
-./target/release/bench
+./target/release/lsp-bench
 ```
 
 Benchmark source: [github.com/mmsaki/solidity-lsp-benchmarks](https://github.com/mmsaki/solidity-lsp-benchmarks)

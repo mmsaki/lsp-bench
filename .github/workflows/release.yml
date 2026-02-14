@@ -34,17 +34,18 @@ jobs:
 
       - name: Package
         run: |
-          ARCHIVE="solidity-lsp-bench-${{ github.ref_name }}-${{ matrix.target }}"
+          ARCHIVE="lsp-bench-${{ github.ref_name }}-${{ matrix.target }}"
           mkdir -p "$ARCHIVE"
-          cp target/${{ matrix.target }}/release/bench "$ARCHIVE/"
+          cp target/${{ matrix.target }}/release/lsp-bench "$ARCHIVE/"
           cp target/${{ matrix.target }}/release/gen-readme "$ARCHIVE/"
           cp target/${{ matrix.target }}/release/gen-analysis "$ARCHIVE/"
+          cp target/${{ matrix.target }}/release/gen-delta "$ARCHIVE/"
           tar czf "$ARCHIVE.tar.gz" "$ARCHIVE"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: solidity-lsp-bench-${{ matrix.target }}
+          name: lsp-bench-${{ matrix.target }}
           path: "*.tar.gz"
 
   release:
