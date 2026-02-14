@@ -198,11 +198,14 @@ fn main() {
             let semver = extract_semver(version);
 
             table.push_str(&format!("**{}**", name));
+            if !semver.is_empty() {
+                table.push_str(&format!(" · v{}", semver));
+            }
             if !short_commit.is_empty() {
                 // Link commit hash to GitHub release tag if we have both a link and semver
                 if !link.is_empty() && !semver.is_empty() {
                     table.push_str(&format!(
-                        " · [`{}`]({}/releases/tag/v{})",
+                        " [`{}`]({}/releases/tag/v{})",
                         short_commit,
                         link.trim_end_matches('/'),
                         semver
@@ -219,29 +222,25 @@ fn main() {
     }
     table.push('\n');
 
-    // Use short commit hash as column header when available
-    let base_col_label = find_server_meta(&base)
-        .and_then(|m| m["version"].as_str())
-        .map(|v| {
-            let short = extract_short_commit(v);
-            if short != v {
-                short
-            } else {
-                base.clone()
-            }
-        })
-        .unwrap_or_else(|| base.clone());
-    let head_col_label = find_server_meta(&head)
-        .and_then(|m| m["version"].as_str())
-        .map(|v| {
-            let short = extract_short_commit(v);
-            if short != v {
-                short
-            } else {
-                head.clone()
-            }
-        })
-        .unwrap_or_else(|| head.clone());
+    // Build column labels: "v0.1.14 (3d6a3d1)" or just the label
+    let make_col_label = |name: &str| -> String {
+        find_server_meta(name)
+            .and_then(|m| m["version"].as_str())
+            .map(|v| {
+                let semver = extract_semver(v);
+                let short = extract_short_commit(v);
+                let has_commit = short != v;
+                match (!semver.is_empty(), has_commit) {
+                    (true, true) => format!("v{} ({})", semver, short),
+                    (true, false) => format!("v{}", semver),
+                    (false, true) => short,
+                    (false, false) => name.to_string(),
+                }
+            })
+            .unwrap_or_else(|| name.to_string())
+    };
+    let base_col_label = make_col_label(&base);
+    let head_col_label = make_col_label(&head);
 
     // Compute column widths
     let col0 = "Benchmark"
