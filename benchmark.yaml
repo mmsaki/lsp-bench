@@ -33,6 +33,7 @@ benchmarks:
   - textDocument/prepareRename
   - textDocument/documentSymbol
   - textDocument/documentLink
+  - textDocument/formatting
   - workspace/symbol
 
 # LSP servers to benchmark

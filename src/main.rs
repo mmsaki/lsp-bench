@@ -43,6 +43,11 @@ struct Config {
         rename = "response"
     )]
     response_limit: usize,
+    /// Optional trigger character for completion requests (e.g. ".").
+    /// When set, the completion request includes a `context` with
+    /// `triggerKind: 2` (TriggerCharacter) and the given character.
+    #[serde(default)]
+    trigger_character: Option<String>,
     servers: Vec<ServerConfig>,
 }
 
@@ -1178,6 +1183,7 @@ fn main() {
     let index_timeout = Duration::from_secs(cfg.index_timeout);
     let target_line = cfg.line;
     let target_col = cfg.col;
+    let trigger_character = cfg.trigger_character;
     let output_dir = cfg.output;
     let report_path = cfg.report;
     let report_style = cfg.report_style;
@@ -1295,10 +1301,17 @@ fn main() {
         })
     };
     let completion_params = |file_uri: &str| -> Value {
-        json!({
+        let mut params = json!({
             "textDocument": { "uri": file_uri },
             "position": { "line": target_line, "character": target_col },
-        })
+        });
+        if let Some(ref tc) = trigger_character {
+            params["context"] = json!({
+                "triggerKind": 2,
+                "triggerCharacter": tc,
+            });
+        }
+        params
     };
     let formatting_params = |file_uri: &str| -> Value {
         json!({
