@@ -1143,12 +1143,15 @@ const ALL_BENCHMARKS: &[&str] = &[
 ];
 
 fn print_usage() {
+    eprintln!("lsp-bench {}", env!("LONG_VERSION"));
+    eprintln!();
     eprintln!("Usage: lsp-bench [OPTIONS]");
     eprintln!("       lsp-bench init");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  -c, --config <PATH>   Config file (default: benchmark.yaml)");
     eprintln!("  -s, --server <NAME>   Filter servers (repeatable)");
+    eprintln!("  -V, --version         Show version");
     eprintln!("  -h, --help            Show this help");
     eprintln!();
     eprintln!("All settings are configured in benchmark.yaml. See DOCS.md for details.");
@@ -1268,6 +1271,10 @@ fn main() {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "-V" | "--version" => {
+                eprintln!("lsp-bench {}", env!("LONG_VERSION"));
+                std::process::exit(0);
+            }
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
