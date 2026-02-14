@@ -195,18 +195,23 @@ fn main() {
             let link = meta["link"].as_str().unwrap_or("");
             let description = meta["description"].as_str().unwrap_or("");
             let short_commit = extract_short_commit(version);
+            let semver = extract_semver(version);
 
             table.push_str(&format!("**{}**", name));
             if !short_commit.is_empty() {
-                table.push_str(&format!(" · `{}`", short_commit));
-            }
-            if !link.is_empty() {
-                if !description.is_empty() {
-                    table.push_str(&format!(" · [{}]({})", description, link));
+                // Link commit hash to GitHub release tag if we have both a link and semver
+                if !link.is_empty() && !semver.is_empty() {
+                    table.push_str(&format!(
+                        " · [`{}`]({}/releases/tag/v{})",
+                        short_commit,
+                        link.trim_end_matches('/'),
+                        semver
+                    ));
                 } else {
-                    table.push_str(&format!(" · [link]({})", link));
+                    table.push_str(&format!(" · `{}`", short_commit));
                 }
-            } else if !description.is_empty() {
+            }
+            if !description.is_empty() {
                 table.push_str(&format!(" · {}", description));
             }
             table.push('\n');
@@ -376,6 +381,25 @@ fn format_delta(base_ms: f64, head_ms: f64) -> String {
 /// Handles formats like:
 ///   "solidity-language-server 0.1.14+commit.3d6a3d1.macos.aarch64" -> "3d6a3d1"
 ///   "0.8.33+commit.64118f21.Darwin.appleclang" -> "64118f21"
+/// Extract the semver portion (e.g. "0.1.14") from a version string like
+/// "solidity-language-server 0.1.14+commit.3d6a3d1.macos.aarch64" or
+/// "0.8.33+commit.64118f21.Darwin.appleclang". Returns empty string if not found.
+fn extract_semver(version: &str) -> String {
+    // Split on '+' first to isolate "name 0.1.14" or "0.8.33"
+    let before_plus = version.split('+').next().unwrap_or("");
+    // Take the last whitespace-separated token (handles "binary-name 0.1.14")
+    let candidate = before_plus.split_whitespace().last().unwrap_or("");
+    // Verify it looks like semver (digits and dots)
+    if !candidate.is_empty()
+        && candidate.contains('.')
+        && candidate.chars().all(|c| c.is_ascii_digit() || c == '.')
+    {
+        candidate.to_string()
+    } else {
+        String::new()
+    }
+}
+
 /// Falls back to the full version string if no commit pattern found.
 fn extract_short_commit(version: &str) -> String {
     // Look for "+commit.<hash>" pattern
