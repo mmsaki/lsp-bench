@@ -82,6 +82,9 @@ struct MethodConfig {
     /// Trigger character (e.g. ".") — only used for textDocument/completion.
     #[serde(default)]
     trigger: Option<String>,
+    /// New name for textDocument/rename (defaults to "__lsp_bench_rename__").
+    #[serde(default, rename = "newName")]
+    new_name: Option<String>,
     /// Expected response for the base request (no didChange). Used by --verify.
     #[serde(default)]
     expect: Option<ExpectConfig>,
@@ -380,12 +383,12 @@ impl LspClient {
     fn wait_for_valid_diagnostics(&mut self, timeout: Duration) -> Result<DiagnosticsInfo, String> {
         let start = Instant::now();
         let deadline = start + timeout;
-        let mut last_count = 0usize;
+        let mut _last_count = 0usize;
         let mut last_msg = json!(null);
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                return if last_count > 0 {
+                return if _last_count > 0 {
                     Ok(DiagnosticsInfo { message: last_msg })
                 } else {
                     Err("timeout".into())
@@ -400,7 +403,7 @@ impl LspClient {
                     .and_then(|d| d.as_array())
                     .map(|a| a.len())
                     .unwrap_or(0);
-                last_count = count;
+                _last_count = count;
                 last_msg = msg;
                 // if count > 0 {
                 return Ok(DiagnosticsInfo { message: last_msg });
@@ -1343,7 +1346,7 @@ where
 // ── JSON output ─────────────────────────────────────────────────────────────
 
 fn save_json(
-    results: &[(&str, Vec<BenchRow>)],
+    results: &[(&str, Option<Value>, Vec<BenchRow>)],
     versions: &[(&str, String)],
     servers: &[&ServerConfig],
     n: usize,
@@ -1361,11 +1364,15 @@ fn save_json(
     let date = date_stamp();
     let json_benchmarks: Vec<Value> = results
         .iter()
-        .map(|(name, rows)| {
-            json!({
+        .map(|(name, input, rows)| {
+            let mut obj = json!({
                 "name": name,
                 "servers": rows.iter().map(|r| r.to_json()).collect::<Vec<_>>(),
-            })
+            });
+            if let Some(params) = input {
+                obj["input"] = params.clone();
+            }
+            obj
         })
         .collect();
     let json_servers: Vec<Value> = versions
@@ -1399,6 +1406,9 @@ fn save_json(
                 }
                 if let Some(ref t) = v.trigger {
                     obj.insert("trigger".into(), json!(t));
+                }
+                if let Some(ref n) = v.new_name {
+                    obj.insert("newName".into(), json!(n));
                 }
                 (k.clone(), Value::Object(obj))
             })
@@ -1485,6 +1495,28 @@ enum Commands {
         #[arg(short, long, default_value = "benchmark.yaml")]
         config: Option<String>,
     },
+    /// Replay a JSON-RPC request from benchmark output against an LSP server
+    Replay {
+        /// Server command (e.g. "solc --lsp", "solidity-ls --stdio")
+        #[arg(short, long)]
+        server: String,
+
+        /// JSON-RPC input string (from benchmark output's "input" field)
+        #[arg(short, long)]
+        input: String,
+
+        /// Project root directory (defaults to current directory)
+        #[arg(short, long)]
+        project: Option<String>,
+
+        /// File to open before sending the request (extracted from input URI if omitted)
+        #[arg(short, long)]
+        file: Option<String>,
+
+        /// Timeout in seconds for the response (default: 30)
+        #[arg(short, long, default_value = "30")]
+        timeout: u64,
+    },
 }
 
 const EXAMPLE_CONFIG: &str = include_str!("../examples/benchmark.template.yaml");
@@ -1504,14 +1536,146 @@ fn init_config(path: &str) {
     eprintln!("  lsp-bench");
 }
 
+fn replay(server: &str, input: &str, project: Option<&str>, file: Option<&str>, timeout_secs: u64) {
+    // Parse the JSON-RPC input string
+    let rpc: Value = serde_json::from_str(input).unwrap_or_else(|e| {
+        eprintln!("Error: invalid JSON-RPC input: {}", e);
+        std::process::exit(1);
+    });
+    let method = rpc
+        .get("method")
+        .and_then(|m| m.as_str())
+        .unwrap_or_else(|| {
+            eprintln!("Error: input missing \"method\" field");
+            std::process::exit(1);
+        });
+    let params = rpc.get("params").cloned().unwrap_or(json!({}));
+
+    // Extract file URI from params if not provided explicitly
+    let file_uri = params
+        .get("textDocument")
+        .and_then(|td| td.get("uri"))
+        .and_then(|u| u.as_str());
+
+    let file_path: Option<PathBuf> = file.map(PathBuf::from).or_else(|| {
+        file_uri
+            .and_then(|u| u.strip_prefix("file://"))
+            .map(PathBuf::from)
+    });
+
+    // Resolve project root
+    let cwd = project
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap());
+
+    if !cwd.exists() {
+        eprintln!("Error: project directory not found: {}", cwd.display());
+        std::process::exit(1);
+    }
+
+    // Parse server command
+    let parts: Vec<&str> = server.split_whitespace().collect();
+    if parts.is_empty() {
+        eprintln!("Error: empty server command");
+        std::process::exit(1);
+    }
+    let cmd = parts[0];
+    let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+
+    let root = uri(&cwd);
+    let timeout = Duration::from_secs(timeout_secs);
+
+    eprintln!("  {} {}", style("server").dim(), server);
+    eprintln!("  {} {}", style("method").dim(), method);
+    if let Some(ref fp) = file_path {
+        eprintln!("  {} {}", style("file").dim(), fp.display());
+    }
+    eprintln!();
+
+    // Spawn server
+    eprintln!("{}", style("Spawning server...").dim());
+    let mut client = LspClient::spawn(cmd, &args, &cwd).unwrap_or_else(|e| {
+        eprintln!("Error: failed to spawn server: {}", e);
+        std::process::exit(1);
+    });
+
+    // Initialize
+    eprintln!("{}", style("Initializing...").dim());
+    if let Err(e) = client.initialize(&root) {
+        eprintln!("Error: initialize failed: {}", e);
+        std::process::exit(1);
+    }
+
+    // Open file if we have one
+    if let Some(ref fp) = file_path {
+        if fp.exists() {
+            eprintln!("{}", style("Opening file...").dim());
+            if let Err(e) = client.open_file(fp) {
+                eprintln!("Error: open file failed: {}", e);
+                std::process::exit(1);
+            }
+            // Give server a moment to index
+            std::thread::sleep(Duration::from_millis(500));
+        } else {
+            eprintln!(
+                "  {} file not found: {}",
+                style("warn").yellow(),
+                fp.display()
+            );
+        }
+    }
+
+    // Send the request
+    eprintln!("{}", style("Sending request...").dim());
+    let req_id = match client.send(method, params) {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("Error: send failed: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // Read response
+    match client.read_response(req_id, timeout) {
+        Ok(resp) => {
+            let pretty = serde_json::to_string_pretty(&resp).unwrap();
+            eprintln!();
+            println!("{}", pretty);
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
 
-    // Handle init subcommand before loading config
-    if let Some(Commands::Init { config }) = cli.command {
-        let path = config.as_deref().unwrap_or(&cli.config);
-        init_config(path);
-        std::process::exit(0);
+    // Handle subcommands before loading config
+    match cli.command {
+        Some(Commands::Init { config }) => {
+            let path = config.as_deref().unwrap_or(&cli.config);
+            init_config(path);
+            std::process::exit(0);
+        }
+        Some(Commands::Replay {
+            server,
+            input,
+            project,
+            file,
+            timeout,
+        }) => {
+            replay(
+                &server,
+                &input,
+                project.as_deref(),
+                file.as_deref(),
+                timeout,
+            );
+            std::process::exit(0);
+        }
+        None => {}
     }
 
     // Load config
@@ -1622,7 +1786,7 @@ fn main() {
 
     let total = benchmarks.len();
     let mut num = 0usize;
-    let mut all_results: Vec<(&str, Vec<BenchRow>)> = Vec::new();
+    let mut all_results: Vec<(&str, Option<Value>, Vec<BenchRow>)> = Vec::new();
     let mut tally = VerifyTally::new();
 
     // Resolve line/col for a given method, falling back to global defaults.
@@ -1654,10 +1818,14 @@ fn main() {
     let symbol_params = |_method: &str, _file_uri: &str| -> Value { json!({ "query": "" }) };
     let rename_params = |method: &str, file_uri: &str| -> Value {
         let (l, c) = pos_for(method);
+        let new_name = methods
+            .get(method)
+            .and_then(|m| m.new_name.as_deref())
+            .unwrap_or("__lsp_bench_rename__");
         json!({
             "textDocument": { "uri": file_uri },
             "position": { "line": l, "character": c },
-            "newName": "__lsp_bench_rename__",
+            "newName": new_name,
         })
     };
     let completion_params = |method: &str, file_uri: &str| -> Value {
@@ -1809,7 +1977,7 @@ fn main() {
         let rows = run_bench(&avail, response_limit, |srv, on_progress| {
             bench_spawn(srv, &root, &cwd, w, n, on_progress)
         });
-        all_results.push(("initialize", rows));
+        all_results.push(("initialize", None, rows));
         let p = save_json(
             &all_results,
             &versions,
@@ -1849,7 +2017,7 @@ fn main() {
                 on_progress,
             )
         });
-        all_results.push(("textDocument/diagnostic", rows));
+        all_results.push(("textDocument/diagnostic", None, rows));
         let p = save_json(
             &all_results,
             &versions,
@@ -2010,7 +2178,10 @@ fn main() {
                 }
             }
 
-            all_results.push((method, rows));
+            let params = params_fn(method, &uri(&bench_sol));
+            let rpc = json!({"jsonrpc": "2.0", "id": 1, "method": lsp_method, "params": params});
+            let input = Some(Value::String(serde_json::to_string(&rpc).unwrap()));
+            all_results.push((method, input, rows));
             let p = save_json(
                 &all_results,
                 &versions,

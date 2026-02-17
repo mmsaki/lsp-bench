@@ -87,6 +87,8 @@ methods:
   textDocument/hover:
     line: 10
     col: 15
+  textDocument/rename:
+    newName: "MyNewName"
 ```
 
 ### Verification
@@ -123,7 +125,7 @@ Exits non-zero on any mismatch. See [DOCS.md](DOCS.md) for per-snapshot expect o
 | `index_timeout` | 15 | Seconds for server to index |
 | `output` | `benchmarks` | Directory for JSON results |
 | `benchmarks` | all | List of benchmarks to run |
-| `methods` | -- | Per-method `line`, `col`, `trigger`, and `expect` overrides |
+| `methods` | -- | Per-method `line`, `col`, `trigger`, `newName`, and `expect` overrides |
 | `response` | 80 | `full` (no truncation) or a number (truncate to N chars) |
 | `report` | -- | Output path for generated report |
 | `report_style` | `delta` | Report format: `delta`, `readme`, or `analysis` |
@@ -135,6 +137,7 @@ lsp-bench                            # uses benchmark.yaml
 lsp-bench -c my-config.yaml          # custom config
 lsp-bench --verify                   # check responses against expect fields
 lsp-bench init                       # generate a benchmark.yaml template
+lsp-bench replay -s "solc --lsp" -p v4-core -i '<json-rpc>'  # replay a request
 lsp-bench --version                  # show version with commit hash
 ```
 
@@ -144,6 +147,19 @@ lsp-bench --version                  # show version with commit hash
 | `--verify` | Check responses against `expect` fields. Exits non-zero on mismatch. |
 | `-V, --version` | Show version (includes commit hash, OS, arch) |
 | `-h, --help` | Show help |
+
+### Replay
+
+Replay a JSON-RPC request from benchmark output against any LSP server. Handles initialization, file opening, and `Content-Length` framing automatically.
+
+```sh
+lsp-bench replay \
+  --server "solc --lsp" \
+  --project v4-core \
+  --input '{"id":1,"jsonrpc":"2.0","method":"textDocument/rename","params":{...}}'
+```
+
+The `--input` value is the `input` field from benchmark JSON output. See [DOCS.md](DOCS.md) for details.
 
 All benchmark settings are configured in the YAML file.
 

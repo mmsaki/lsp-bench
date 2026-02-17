@@ -50,6 +50,7 @@ Servers not found on `$PATH` are automatically skipped during benchmarks.
 |---------|-------------|
 | `lsp-bench` | Run benchmarks from config |
 | `lsp-bench init` | Generate a `benchmark.yaml` template (won't overwrite existing) |
+| `lsp-bench replay` | Replay a JSON-RPC request from benchmark output against an LSP server |
 
 ## Configuration
 
@@ -163,6 +164,8 @@ methods:
   textDocument/definition:
     line: 200
     col: 15
+  textDocument/rename:
+    newName: "MyNewName"       # custom rename identifier (default: __lsp_bench_rename__)
 ```
 
 | Field | Description |
@@ -170,6 +173,7 @@ methods:
 | `line` | Override line for this method (falls back to global `line`) |
 | `col` | Override column for this method (falls back to global `col`) |
 | `trigger` | Trigger character for completion (e.g. `"."`) — only used by `textDocument/completion` |
+| `newName` | New name for `textDocument/rename` (defaults to `"__lsp_bench_rename__"`) |
 | `expect` | Expected response for `--verify` mode (see [Verification](#verification) below) |
 | `didChange` | List of file snapshots to send via `textDocument/didChange` before benchmarking (see below) |
 
@@ -584,6 +588,54 @@ lsp-bench -c configs/fast.yaml       # config can be in any path
 
 All benchmark settings (iterations, warmup, timeout, servers, etc.) are configured in the YAML file.
 
+### Replay
+
+The `replay` subcommand replays a JSON-RPC request from benchmark output against an LSP server. It handles the full LSP lifecycle — spawning the server, performing the `initialize`/`initialized` handshake, opening the target file via `textDocument/didOpen`, and sending the request with proper `Content-Length` framing.
+
+```sh
+lsp-bench replay \
+  --server "solc --lsp" \
+  --project v4-core \
+  --input '{"id":1,"jsonrpc":"2.0","method":"textDocument/rename","params":{"newName":"NewName","position":{"character":15,"line":109},"textDocument":{"uri":"file:///path/to/Pool.sol"}}}'
+```
+
+The `--input` value is the `input` field from benchmark JSON output (see [JSON structure](#json-structure) below). Copy it directly from the benchmark results.
+
+| Flag | Description |
+|------|-------------|
+| `-s, --server <CMD>` | Server command (e.g. `"solc --lsp"`, `"solidity-ls --stdio"`) |
+| `-i, --input <JSON>` | JSON-RPC input string (from benchmark output's `"input"` field) |
+| `-p, --project <DIR>` | Project root directory (defaults to current directory) |
+| `-f, --file <PATH>` | File to open before sending the request (auto-detected from input URI if omitted) |
+| `-t, --timeout <SECS>` | Timeout in seconds for the response (default: 30) |
+
+**Example: reproducing an InternalCompilerError in solc**
+
+```sh
+# 1. Run a benchmark that captures the input
+lsp-bench -c ice.yaml
+
+# 2. Copy the "input" field from the JSON output for textDocument/rename
+# 3. Replay it against solc to reproduce the crash
+lsp-bench replay \
+  --server "solc --lsp" \
+  --project v4-core \
+  --input '{"id":1,"jsonrpc":"2.0","method":"textDocument/rename","params":{"newName":"NewName","position":{"character":15,"line":109},"textDocument":{"uri":"file:///path/to/v4-core/src/libraries/Pool.sol"}}}'
+```
+
+Output:
+
+```json
+{
+  "error": {
+    "code": -32603,
+    "message": "Unhandled exception: .../CompilerStack.cpp(1249): Throw in function ...\nDynamic exception type: boost::wrapexcept<solidity::langutil::InternalCompilerError>\nstd::exception::what: Parsing not yet performed.\n"
+  },
+  "id": 2,
+  "jsonrpc": "2.0"
+}
+```
+
 ## Methodology
 
 ### How benchmarks work
@@ -757,6 +809,18 @@ During a run, partial results are saved to `<output>/partial/` after each benchm
 If `report` is set in the config, the report is automatically generated from the final JSON snapshot using the chosen `report_style` (default: `delta`).
 
 ### JSON structure
+
+Each benchmark entry includes an `input` field containing the full JSON-RPC request that was sent to the server. This is a stringified JSON-RPC envelope with `jsonrpc`, `id`, `method`, and `params`:
+
+```json
+{
+  "name": "textDocument/rename",
+  "input": "{\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"textDocument/rename\",\"params\":{\"newName\":\"NewName\",\"position\":{\"character\":15,\"line\":109},\"textDocument\":{\"uri\":\"file:///path/to/Pool.sol\"}}}",
+  "servers": [ ... ]
+}
+```
+
+The `input` field can be passed directly to `lsp-bench replay --input` to reproduce the exact request against any server. For `initialize` and `textDocument/diagnostic` benchmarks, the `input` field is omitted.
 
 Each result stores per-iteration data in an `iterations` array. For successful benchmarks (`status: "ok"`), the top-level `response` field contains the summary response (from the first iteration). Every iteration includes both its latency (`ms`) and its full `response`:
 
