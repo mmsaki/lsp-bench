@@ -706,10 +706,13 @@ impl BenchRow {
                     .iterations
                     .iter()
                     .map(|(ms, resp)| {
-                        json!({
+                        let mut iter = json!({
                             "ms": (ms * 100.0).round() / 100.0,
-                            "response": resp,
-                        })
+                        });
+                        if resp != &self.summary {
+                            iter["response"] = resp.clone();
+                        }
+                        iter
                     })
                     .collect();
                 let mut obj = json!({

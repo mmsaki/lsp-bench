@@ -579,7 +579,7 @@ If `report` is set in the config, the report is automatically generated from the
 
 ### JSON structure
 
-Each result stores per-iteration data in an `iterations` array. For successful benchmarks (`status: "ok"`), every iteration records its latency and the server's response:
+Each result stores per-iteration data in an `iterations` array. For successful benchmarks (`status: "ok"`), the top-level `response` field contains the canonical response (from the first iteration). Individual iterations record only their latency — unless their response differs from the canonical one, in which case the differing `response` is included:
 
 ```json
 {
@@ -591,14 +591,16 @@ Each result stores per-iteration data in an `iterations` array. For successful b
   "rss_kb": 40944,
   "response": { "uri": "file:///...TickMath.sol", "range": { "start": { "line": 9, "character": 4 }, "end": { "line": 9, "character": 12 } } },
   "iterations": [
-    { "ms": 8.80, "response": { "uri": "file:///...TickMath.sol", "range": { "..." : "..." } } },
-    { "ms": 8.45, "response": { "uri": "file:///...TickMath.sol", "range": { "..." : "..." } } },
-    { "ms": 8.55, "response": { "uri": "file:///...TickMath.sol", "range": { "..." : "..." } } }
+    { "ms": 8.80 },
+    { "ms": 8.45 },
+    { "ms": 8.55, "response": { "uri": "file:///...Other.sol", "range": { "..." : "..." } } }
   ]
 }
 ```
 
-Responses are stored as native JSON values (objects, arrays, strings, or null) — not escaped strings. For `initialize` benchmarks, the response is `"ok"` for each iteration and `rss_kb` is omitted (process is too short-lived). For `textDocument/diagnostic` benchmarks, `rss_kb` is the peak RSS across all iterations (each iteration spawns a fresh server). For method benchmarks (`textDocument/definition`, `textDocument/hover`, etc.), `rss_kb` is measured once after indexing completes. The top-level `response` field duplicates the first iteration's response for backward compatibility.
+In this example, iterations 1 and 2 returned the same response as the top-level `response`, so only `ms` is stored. Iteration 3 returned something different, so its `response` is included explicitly.
+
+Responses are stored as native JSON values (objects, arrays, strings, or null) — not escaped strings. For `initialize` benchmarks, the response is `"ok"` for each iteration and `rss_kb` is omitted (process is too short-lived). For `textDocument/diagnostic` benchmarks, `rss_kb` is the peak RSS across all iterations (each iteration spawns a fresh server). For method benchmarks (`textDocument/definition`, `textDocument/hover`, etc.), `rss_kb` is measured once after indexing completes.
 
 Failed or unsupported benchmarks (`status: "fail"` or `"invalid"`) have no `iterations` array:
 
