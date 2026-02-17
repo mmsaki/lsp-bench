@@ -153,13 +153,14 @@ JSON snapshots with per-iteration latency, response data, and memory:
   "rss_kb": 40944,
   "response": { "uri": "file:///...Main.sol", "range": { "start": { "line": 9, "character": 4 }, "end": { "line": 9, "character": 10 } } },
   "iterations": [
-    { "ms": 8.80, "response": { "uri": "file:///...Main.sol", "range": { "..." : "..." } } },
-    { "ms": 8.45, "response": { "uri": "file:///...Main.sol", "range": { "..." : "..." } } }
+    { "ms": 8.80 },
+    { "ms": 8.45 },
+    { "ms": 9.12, "response": { "uri": "file:///...Other.sol", "range": { "..." : "..." } } }
   ]
 }
 ```
 
-Responses are stored as native JSON values (objects, arrays, strings, or null) — not escaped strings.
+The top-level `response` is the canonical result. Per-iteration `response` is only included when it differs from the canonical one. Responses are stored as native JSON values (objects, arrays, strings, or null).
 
 ### Report Generation
 
