@@ -1,124 +1,197 @@
-# Solidity LSP Benchmark Analysis
+# lsp-bench
 
-Analysis of `v4-core` (`src/libraries/Pool.sol`) — 10 iterations per benchmark.
+A benchmarking framework for [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) (LSP) servers. Measures latency, correctness, and memory usage for any LSP server that communicates over JSON-RPC stdio.
 
-## Servers
+## Install
 
-| Server | Description | Version |
-|--------|-------------|---------|
-| [mmsaki](https://github.com/mmsaki/solidity-language-server) | Solidity Language Server by mmsaki | `solidity-language-server 0.1.14+commit.3d6a3d1.macos.aarch64` |
-| [solc](https://docs.soliditylang.org) | Official Solidity compiler LSP | `0.8.33+commit.64118f21.Darwin.appleclang` |
-| [nomicfoundation](https://github.com/NomicFoundation/hardhat-vscode) | Hardhat/Nomic Foundation Solidity Language Server | `@nomicfoundation/solidity-language-server 0.8.25` |
-| [juanfranblanco](https://github.com/juanfranblanco/vscode-solidity) | VSCode Solidity by Juan Blanco | `vscode-solidity-server 0.0.187` |
-| [qiuxiang](https://github.com/qiuxiang/solidity-ls) | Solidity Language Server by qiuxiang | `solidity-ls 0.5.4` |
+```sh
+cargo install lsp-bench
+```
 
-## Capability Matrix
+Or build from source:
 
-| Benchmark | mmsaki | solc | nomicfoundation | juanfranblanco | qiuxiang |
-|-----------|--------|------|-----------------|----------------|----------|
-| initialize | ok | ok | ok | ok | ok |
-| textDocument/diagnostic | ok | ok | timeout | crash | timeout |
-| textDocument/definition | ok | empty | timeout | crash | timeout |
-| textDocument/declaration | ok | no | timeout | crash | timeout |
-| textDocument/hover | ok | empty | timeout | crash | timeout |
-| textDocument/references | ok | no | timeout | crash | timeout |
-| textDocument/documentSymbol | ok | no | timeout | crash | timeout |
-| textDocument/documentLink | ok | no | timeout | crash | timeout |
+```sh
+git clone --recursive https://github.com/mmsaki/solidity-lsp-benchmarks.git
+cd solidity-lsp-benchmarks
+cargo build --release
+```
 
-| Server | Working | Failed | Success Rate |
-|--------|---------|--------|--------------|
-| mmsaki | 8/8 | 0/8 | 100% |
-| solc | 2/8 | 6/8 | 25% |
-| nomicfoundation | 1/8 | 7/8 | 12% |
-| juanfranblanco | 1/8 | 7/8 | 12% |
-| qiuxiang | 1/8 | 7/8 | 12% |
+## Quick Start
 
-## initialize
+```sh
+lsp-bench init          # generates benchmark.yaml
+# edit benchmark.yaml with your project and servers
+lsp-bench               # run benchmarks
+```
 
-| Server | Status | Mean | p50 | p95 | Spread | Spike | Min | Max | Range | Overhead | vs mmsaki |
-|--------|--------|------|-----|-----|--------|-------|-----|-----|-------|----------|-----------|
-| mmsaki | ok | 4.13ms | 4.2ms | 4.6ms | 0.4ms | 1.09x | 3.77ms | 4.59ms | 0.82ms | **1.0x (fastest)** | - |
-| solc | ok | 116.04ms | 116.5ms | 117.8ms | 1.3ms | 1.01x | 114.28ms | 117.81ms | 3.53ms | **28.1x** | **28.1x slower** |
-| nomicfoundation | ok | 882.34ms | 877.4ms | 902.3ms | **25.0ms** | 1.03x | 869.44ms | 902.32ms | **32.88ms** | **213.6x** | **213.6x slower** |
-| juanfranblanco | ok | 524.35ms | 524.8ms | 526.9ms | 2.1ms | 1.00x | 520.96ms | 526.85ms | 5.89ms | **127.0x** | **127.0x slower** |
-| qiuxiang | ok | 70.60ms | 71.0ms | 71.9ms | 1.0ms | 1.01x | 69.11ms | 71.93ms | 2.82ms | **17.1x** | **17.1x slower** |
+## What It Measures
 
-## textDocument/diagnostic
+| Benchmark | What it tests |
+|-----------|---------------|
+| `initialize` | Cold-start time (fresh process per iteration) |
+| `textDocument/diagnostic` | Time to analyze a file and return diagnostics |
+| `textDocument/definition` | Go to Definition latency |
+| `textDocument/declaration` | Go to Declaration latency |
+| `textDocument/typeDefinition` | Go to Type Definition latency |
+| `textDocument/implementation` | Go to Implementation latency |
+| `textDocument/hover` | Hover information latency |
+| `textDocument/references` | Find References latency |
+| `textDocument/completion` | Completion suggestions latency |
+| `textDocument/signatureHelp` | Signature Help latency |
+| `textDocument/rename` | Rename symbol latency |
+| `textDocument/prepareRename` | Prepare Rename latency |
+| `textDocument/documentSymbol` | Document Symbols latency |
+| `textDocument/documentLink` | Document Links latency |
+| `textDocument/formatting` | Document Formatting latency |
+| `textDocument/foldingRange` | Folding Ranges latency |
+| `textDocument/selectionRange` | Selection Ranges latency |
+| `textDocument/codeLens` | Code Lens latency |
+| `textDocument/inlayHint` | Inlay Hints latency |
+| `textDocument/semanticTokens/full` | Semantic Tokens latency |
+| `textDocument/documentColor` | Document Color latency |
+| `workspace/symbol` | Workspace Symbol search latency |
 
-| Server | Status | Mem | Mean | p50 | p95 | Spread | Spike | Min | Max | Range | Overhead | vs mmsaki |
-|--------|--------|-----|------|-----|-----|--------|-------|-----|-----|-------|----------|-----------|
-| mmsaki | ok | 39.7 MB | 454.45ms | 452.1ms | 473.6ms | **21.5ms** | 1.05x | 449.46ms | 473.56ms | **24.10ms** | 3.3x | - |
-| solc | ok | 26.2 MB | 136.80ms | 136.7ms | 138.3ms | 1.6ms | 1.01x | 135.92ms | 138.35ms | 2.43ms | **1.0x (fastest)** | 3.3x faster |
-| nomicfoundation | timeout | 509.9 MB | - | - | - | - | - | - | - | - | - | timeout |
-| juanfranblanco | crash | 0.0 MB | - | - | - | - | - | - | - | - | - | crash |
-| qiuxiang | timeout | 69.7 MB | - | - | - | - | - | - | - | - | - | timeout |
+Each benchmark records per-iteration latency (p50, p95, mean), the full LSP response, and resident memory (RSS).
 
-## textDocument/definition
+## Configuration
 
-| Server | Status | Mem | Mean | p50 | p95 | Spread | Spike | Min | Max | Range | vs mmsaki |
-|--------|--------|-----|------|-----|-----|--------|-------|-----|-----|-------|-----------|
-| mmsaki | ok | 26.4 MB | 8.95ms | 9.2ms | 9.5ms | 0.3ms | 1.04x | 8.51ms | 9.52ms | 1.01ms | - |
-| solc | empty | 26.2 MB | - | - | - | - | - | - | - | - | empty |
-| nomicfoundation | timeout | 509.7 MB | - | - | - | - | - | - | - | - | timeout |
-| juanfranblanco | crash | 0.0 MB | - | - | - | - | - | - | - | - | crash |
-| qiuxiang | timeout | 68.7 MB | - | - | - | - | - | - | - | - | timeout |
+Create a `benchmark.yaml`:
 
-## textDocument/declaration
+```yaml
+project: my-project
+file: src/main.rs
+line: 45
+col: 12
 
-| Server | Status | Mem | Mean | p50 | p95 | Spread | Spike | Min | Max | Range | vs mmsaki |
-|--------|--------|-----|------|-----|-----|--------|-------|-----|-----|-------|-----------|
-| mmsaki | ok | 35.7 MB | 9.04ms | 8.9ms | 9.9ms | 1.0ms | 1.11x | 8.58ms | 9.86ms | 1.28ms | - |
-| solc | no | 26.1 MB | - | - | - | - | - | - | - | - | empty |
-| nomicfoundation | timeout | 510.8 MB | - | - | - | - | - | - | - | - | timeout |
-| juanfranblanco | crash | 0.0 MB | - | - | - | - | - | - | - | - | crash |
-| qiuxiang | timeout | 69.4 MB | - | - | - | - | - | - | - | - | timeout |
+iterations: 10
+warmup: 2
+timeout: 10
+index_timeout: 15
 
-## textDocument/hover
+benchmarks:
+  - all
 
-| Server | Status | Mem | Mean | p50 | p95 | Spread | Spike | Min | Max | Range | vs mmsaki |
-|--------|--------|-----|------|-----|-----|--------|-------|-----|-----|-------|-----------|
-| mmsaki | ok | 30.0 MB | 14.01ms | 14.0ms | 14.7ms | 0.7ms | 1.05x | 13.51ms | 14.67ms | 1.16ms | - |
-| solc | empty | 26.0 MB | - | - | - | - | - | - | - | - | empty |
-| nomicfoundation | timeout | 511.8 MB | - | - | - | - | - | - | - | - | timeout |
-| juanfranblanco | crash | 0.0 MB | - | - | - | - | - | - | - | - | crash |
-| qiuxiang | timeout | 69.9 MB | - | - | - | - | - | - | - | - | timeout |
+servers:
+  - label: my-server
+    cmd: my-language-server
+    args: ["--stdio"]
 
-## textDocument/references
+  - label: other-server
+    cmd: other-lsp
+    args: ["--stdio"]
+```
 
-| Server | Status | Mem | Mean | p50 | p95 | Spread | Spike | Min | Max | Range | vs mmsaki |
-|--------|--------|-----|------|-----|-----|--------|-------|-----|-----|-------|-----------|
-| mmsaki | ok | 30.3 MB | 11.06ms | 10.6ms | 14.4ms | 3.8ms | 1.36x | 10.24ms | 14.40ms | 4.16ms | - |
-| solc | no | 26.1 MB | - | - | - | - | - | - | - | - | empty |
-| nomicfoundation | timeout | 511.7 MB | - | - | - | - | - | - | - | - | timeout |
-| juanfranblanco | crash | 0.0 MB | - | - | - | - | - | - | - | - | crash |
-| qiuxiang | timeout | 70.1 MB | - | - | - | - | - | - | - | - | timeout |
+### Per-Method Overrides
 
-## textDocument/documentSymbol
+Use `methods:` to set different positions or trigger characters for specific LSP methods. Methods not listed fall back to the global `line`/`col`.
 
-| Server | Status | Mem | Mean | p50 | p95 | Spread | Spike | Min | Max | Range | vs mmsaki |
-|--------|--------|-----|------|-----|-----|--------|-------|-----|-----|-------|-----------|
-| mmsaki | ok | 25.8 MB | 8.72ms | 8.8ms | 9.2ms | 0.3ms | 1.04x | 8.26ms | 9.17ms | 0.91ms | - |
-| solc | no | 26.1 MB | - | - | - | - | - | - | - | - | empty |
-| nomicfoundation | timeout | 513.5 MB | - | - | - | - | - | - | - | - | timeout |
-| juanfranblanco | crash | 0.0 MB | - | - | - | - | - | - | - | - | crash |
-| qiuxiang | timeout | 70.0 MB | - | - | - | - | - | - | - | - | timeout |
+```yaml
+methods:
+  textDocument/completion:
+    trigger: "."
+  textDocument/hover:
+    line: 10
+    col: 15
+```
 
-## textDocument/documentLink
+### Config Fields
 
-| Server | Status | Mem | Mean | p50 | p95 | Spread | Spike | Min | Max | Range | vs mmsaki |
-|--------|--------|-----|------|-----|-----|--------|-------|-----|-----|-------|-----------|
-| mmsaki | ok | 26.7 MB | 64.32ms | 64.5ms | 65.2ms | 0.7ms | 1.01x | 63.34ms | 65.24ms | 1.90ms | - |
-| solc | no | 25.7 MB | - | - | - | - | - | - | - | - | empty |
-| nomicfoundation | timeout | 511.9 MB | - | - | - | - | - | - | - | - | timeout |
-| juanfranblanco | crash | 0.0 MB | - | - | - | - | - | - | - | - | crash |
-| qiuxiang | timeout | 69.5 MB | - | - | - | - | - | - | - | - | timeout |
+| Field | Default | Description |
+|-------|---------|-------------|
+| `project` | -- | Path to project root |
+| `file` | -- | Target file to benchmark (relative to project) |
+| `line` | 102 | Target line for position-based benchmarks (0-based) |
+| `col` | 15 | Target column (0-based) |
+| `iterations` | 10 | Measured iterations per benchmark |
+| `warmup` | 2 | Warmup iterations (discarded) |
+| `timeout` | 10 | Seconds per LSP request |
+| `index_timeout` | 15 | Seconds for server to index |
+| `output` | `benchmarks` | Directory for JSON results |
+| `benchmarks` | all | List of benchmarks to run |
+| `methods` | -- | Per-method `line`, `col`, and `trigger` overrides |
+| `response` | 80 | `full` (no truncation) or a number (truncate to N chars) |
+| `report` | -- | Output path for generated report |
+| `report_style` | `delta` | Report format: `delta`, `readme`, or `analysis` |
 
-## Peak Memory (RSS)
+See [DOCS.md](DOCS.md) for the full configuration reference, example configs, methodology, and report generation details.
 
-| mmsaki | solc | nomicfoundation | juanfranblanco | qiuxiang |
-|--------|------|-----------------|----------------|----------|
-| 39.7 MB | 26.2 MB | 513.5 MB | 0.0 MB | 70.1 MB |
+## CLI
 
----
+```sh
+lsp-bench                            # uses benchmark.yaml
+lsp-bench -c my-config.yaml          # custom config
+lsp-bench init                       # generate a benchmark.yaml template
+lsp-bench --version                  # show version with commit hash
+```
 
-*Generated from [`benchmarks/v4-core/2026-02-13T10-31-12Z.json`](benchmarks/v4-core/2026-02-13T10-31-12Z.json) — benchmark run: 2026-02-13T10:31:12Z*
+| Flag | Description |
+|------|-------------|
+| `-c, --config <PATH>` | Config file (default: `benchmark.yaml`) |
+| `-V, --version` | Show version (includes commit hash, OS, arch) |
+| `-h, --help` | Show help |
+
+## Binaries
+
+| Binary | Purpose |
+|--------|---------|
+| `lsp-bench` | Run benchmarks, produce JSON snapshots |
+| `gen-readme` | Generate README with medals and feature matrix |
+| `gen-analysis` | Generate per-feature analysis report |
+| `gen-delta` | Generate compact comparison table |
+
+## Output
+
+JSON snapshots with per-iteration latency, response data, and memory:
+
+```json
+{
+  "server": "my-server",
+  "status": "ok",
+  "mean_ms": 8.8,
+  "p50_ms": 8.8,
+  "p95_ms": 10.1,
+  "rss_kb": 40944,
+  "response": { "uri": "file:///...Main.sol", "range": { "start": { "line": 9, "character": 4 }, "end": { "line": 9, "character": 10 } } },
+  "iterations": [
+    { "ms": 8.80, "response": { "uri": "file:///...Main.sol", "range": { "..." : "..." } } },
+    { "ms": 8.45, "response": { "uri": "file:///...Main.sol", "range": { "..." : "..." } } }
+  ]
+}
+```
+
+Responses are stored as native JSON values (objects, arrays, strings, or null) — not escaped strings.
+
+### Report Generation
+
+Set `report` in your config to auto-generate a report after benchmarks:
+
+```yaml
+report: REPORT.md
+report_style: delta    # delta (default), readme, or analysis
+```
+
+Example delta output:
+
+```
+| Benchmark                | baseline | my-branch |       Delta |
+|--------------------------|----------|-----------|-------------|
+| initialize               |   4.05ms |    3.05ms | 1.3x faster |
+| textDocument/diagnostic  | 123.80ms |  124.10ms | 1.0x (tied) |
+| textDocument/hover       |   2.30ms |    2.21ms | 1.0x (tied) |
+| textDocument/definition  |   8.95ms |    8.90ms | 1.0x (tied) |
+```
+
+## Methodology
+
+- Real LSP requests over JSON-RPC stdio
+- Sequential iterations (next starts after previous completes)
+- Fresh server process for `initialize` and `textDocument/diagnostic`
+- Persistent server for method benchmarks (definition, hover, etc.)
+- RSS memory sampled after indexing
+- Warmup iterations discarded from measurements
+
+See [DOCS.md](DOCS.md) for full methodology details.
+
+## License
+
+MIT

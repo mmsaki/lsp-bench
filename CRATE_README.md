@@ -76,6 +76,19 @@ servers:
     args: ["--stdio"]
 ```
 
+### Per-Method Overrides
+
+Use `methods:` to set different positions or trigger characters for specific LSP methods. Methods not listed fall back to the global `line`/`col`.
+
+```yaml
+methods:
+  textDocument/completion:
+    trigger: "."
+  textDocument/hover:
+    line: 10
+    col: 15
+```
+
 ### Config Fields
 
 | Field | Default | Description |
@@ -90,6 +103,7 @@ servers:
 | `index_timeout` | 15 | Seconds for server to index |
 | `output` | `benchmarks` | Directory for JSON results |
 | `benchmarks` | all | List of benchmarks to run |
+| `methods` | -- | Per-method `line`, `col`, and `trigger` overrides |
 | `response` | 80 | `full` (no truncation) or a number (truncate to N chars) |
 | `report` | -- | Output path for generated report |
 | `report_style` | `delta` | Report format: `delta`, `readme`, or `analysis` |
@@ -132,12 +146,15 @@ JSON snapshots with per-iteration latency, response data, and memory:
   "p50_ms": 8.8,
   "p95_ms": 10.1,
   "rss_kb": 40944,
+  "response": { "uri": "file:///...Main.sol", "range": { "start": { "line": 9, "character": 4 }, "end": { "line": 9, "character": 10 } } },
   "iterations": [
-    { "ms": 8.80, "response": "{ ... }" },
-    { "ms": 8.45, "response": "{ ... }" }
+    { "ms": 8.80, "response": { "uri": "file:///...Main.sol", "range": { "..." : "..." } } },
+    { "ms": 8.45, "response": { "uri": "file:///...Main.sol", "range": { "..." : "..." } } }
   ]
 }
 ```
+
+Responses are stored as native JSON values (objects, arrays, strings, or null).
 
 ## Methodology
 

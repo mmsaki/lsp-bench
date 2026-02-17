@@ -589,16 +589,16 @@ Each result stores per-iteration data in an `iterations` array. For successful b
   "p50_ms": 8.8,
   "p95_ms": 10.1,
   "rss_kb": 40944,
-  "response": "{ ... }",
+  "response": { "uri": "file:///...TickMath.sol", "range": { "start": { "line": 9, "character": 4 }, "end": { "line": 9, "character": 12 } } },
   "iterations": [
-    { "ms": 8.80, "response": "{ \"uri\": \"file:///...TickMath.sol\", ... }" },
-    { "ms": 8.45, "response": "{ \"uri\": \"file:///...TickMath.sol\", ... }" },
-    { "ms": 8.55, "response": "{ \"uri\": \"file:///...TickMath.sol\", ... }" }
+    { "ms": 8.80, "response": { "uri": "file:///...TickMath.sol", "range": { "..." : "..." } } },
+    { "ms": 8.45, "response": { "uri": "file:///...TickMath.sol", "range": { "..." : "..." } } },
+    { "ms": 8.55, "response": { "uri": "file:///...TickMath.sol", "range": { "..." : "..." } } }
   ]
 }
 ```
 
-For `initialize` benchmarks, the response is `"ok"` for each iteration and `rss_kb` is omitted (process is too short-lived). For `textDocument/diagnostic` benchmarks, `rss_kb` is the peak RSS across all iterations (each iteration spawns a fresh server). For method benchmarks (`textDocument/definition`, `textDocument/hover`, etc.), `rss_kb` is measured once after indexing completes. The top-level `response` field duplicates the first iteration's response for backward compatibility.
+Responses are stored as native JSON values (objects, arrays, strings, or null) — not escaped strings. For `initialize` benchmarks, the response is `"ok"` for each iteration and `rss_kb` is omitted (process is too short-lived). For `textDocument/diagnostic` benchmarks, `rss_kb` is the peak RSS across all iterations (each iteration spawns a fresh server). For method benchmarks (`textDocument/definition`, `textDocument/hover`, etc.), `rss_kb` is measured once after indexing completes. The top-level `response` field duplicates the first iteration's response for backward compatibility.
 
 Failed or unsupported benchmarks (`status: "fail"` or `"invalid"`) have no `iterations` array:
 
@@ -606,7 +606,7 @@ Failed or unsupported benchmarks (`status: "fail"` or `"invalid"`) have no `iter
 {
   "server": "solc",
   "status": "invalid",
-  "response": "[]"
+  "response": []
 }
 ```
 
