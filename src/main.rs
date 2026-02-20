@@ -28,6 +28,12 @@ struct ExpectConfig {
     /// Expected 0-based line number in the response.
     #[serde(default)]
     line: Option<u32>,
+    /// Expected number of items in an array response (e.g. references count).
+    #[serde(default)]
+    count: Option<usize>,
+    /// Minimum number of items in an array response. Passes if actual >= min_count.
+    #[serde(default, rename = "minCount")]
+    min_count: Option<usize>,
 }
 
 /// A file snapshot sent via didChange, with its own cursor position.
@@ -50,6 +56,31 @@ struct FileSnapshot {
     /// 0-based column for the benchmark request after this snapshot.
     col: u32,
     /// Expected response (for --verify mode).
+    #[serde(default)]
+    expect: Option<ExpectConfig>,
+}
+
+/// A file to open via didOpen, then re-request on the original file.
+///
+/// ```yaml
+/// didOpen:
+///   - file: src/PoolManager.sol
+///     expect:
+///       minCount: 50
+/// ```
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct DidOpenStep {
+    /// Path to the file to open (relative to project).
+    file: String,
+    /// Optional line override for the re-request on the original file.
+    /// If omitted, uses the method's line.
+    #[serde(default)]
+    line: Option<u32>,
+    /// Optional col override for the re-request on the original file.
+    /// If omitted, uses the method's col.
+    #[serde(default)]
+    col: Option<u32>,
+    /// Expected response after opening this file (for --verify mode).
     #[serde(default)]
     expect: Option<ExpectConfig>,
 }
@@ -79,6 +110,12 @@ struct MethodConfig {
     line: Option<u32>,
     #[serde(default)]
     col: Option<u32>,
+    /// Start line for range-based requests (e.g. semanticTokens/range).
+    #[serde(default, rename = "startLine")]
+    start_line: Option<u32>,
+    /// Start column for range-based requests (e.g. semanticTokens/range).
+    #[serde(default, rename = "startCol")]
+    start_col: Option<u32>,
     /// Trigger character (e.g. ".") — only used for textDocument/completion.
     #[serde(default)]
     trigger: Option<String>,
@@ -92,6 +129,13 @@ struct MethodConfig {
     /// iteration: send content, run one request at that snapshot's line/col.
     #[serde(default, rename = "didChange")]
     did_change: Vec<FileSnapshot>,
+    /// Files to open sequentially via didOpen. After each open (and waiting for
+    /// diagnostics), the benchmark request is re-sent on the original file.
+    /// Used to test cross-file features like forward references: open file A,
+    /// get references, open file B (which imports A), get references again —
+    /// the count should grow as the server discovers more cross-file references.
+    #[serde(default, rename = "didOpen")]
+    did_open: Vec<DidOpenStep>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -795,6 +839,28 @@ fn check_expectation(resp: &Value, expect: &ExpectConfig) -> Result<(), String> 
         }
     }
 
+    // Check exact count (array responses)
+    if let Some(expected_count) = expect.count {
+        let actual_count = result.as_array().map(|a| a.len()).unwrap_or(0);
+        if actual_count != expected_count {
+            return Err(format!(
+                "count: expected {} but got {}",
+                expected_count, actual_count
+            ));
+        }
+    }
+
+    // Check minimum count (array responses)
+    if let Some(min) = expect.min_count {
+        let actual_count = result.as_array().map(|a| a.len()).unwrap_or(0);
+        if actual_count < min {
+            return Err(format!(
+                "minCount: expected >= {} but got {}",
+                min, actual_count
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -1276,6 +1342,295 @@ fn bench_lsp_snapshots(
     BenchResult::Ok { iterations, rss_kb }
 }
 
+/// A resolved didOpen step: absolute path + optional position override.
+struct ResolvedDidOpen {
+    path: PathBuf,
+    line: Option<u32>,
+    col: Option<u32>,
+    expect: Option<ExpectConfig>,
+}
+
+/// Benchmark an LSP method with sequential didOpen steps.
+///
+/// Flow:
+///   1. Spawn server, open primary file, wait for diagnostics
+///   2. Send the benchmark request (iteration 0 = baseline)
+///   3. For each didOpen step:
+///      a. Open the additional file via textDocument/didOpen
+///      b. Wait for diagnostics on the new file
+///      c. Re-send the benchmark request on the **original** file
+///   4. Each step produces one iteration in the result
+///
+/// This tests cross-file features like forward references: opening more files
+/// populates the AST cache, so the reference count should grow.
+fn bench_lsp_didopen(
+    srv: &ServerConfig,
+    root: &str,
+    cwd: &Path,
+    target_file: &Path,
+    method: &str,
+    params_fn: &dyn Fn(&str, &str) -> Value,
+    steps: &[ResolvedDidOpen],
+    base_line: u32,
+    base_col: u32,
+    index_timeout: Duration,
+    timeout: Duration,
+    response_limit: usize,
+    on_progress: &dyn Fn(&str),
+) -> BenchResult {
+    on_progress("spawning");
+    let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd) {
+        Ok(c) => c,
+        Err(e) => {
+            return BenchResult::Fail {
+                error: e,
+                rss_kb: None,
+            }
+        }
+    };
+    if let Err(e) = c.initialize(root) {
+        let rss = get_rss(c.child.id());
+        return BenchResult::Fail {
+            error: e,
+            rss_kb: rss,
+        };
+    }
+    if let Err(e) = c.open_file(target_file) {
+        let rss = get_rss(c.child.id());
+        return BenchResult::Fail {
+            error: e,
+            rss_kb: rss,
+        };
+    }
+    on_progress("waiting for diagnostics");
+    match c.wait_for_valid_diagnostics(index_timeout) {
+        Ok(_) => {}
+        Err(e) => {
+            let rss = get_rss(c.child.id());
+            return BenchResult::Fail {
+                error: format!("wait_for_diagnostics: {}", e),
+                rss_kb: rss,
+            };
+        }
+    }
+    let rss_kb = get_rss(c.child.id());
+    let file_uri = uri(target_file);
+    let total = steps.len() + 1; // +1 for baseline
+    let mut iterations = Vec::new();
+
+    // Iteration 0: baseline request before any didOpen
+    {
+        on_progress(&format!("[1/{}] baseline", total));
+        let start = Instant::now();
+        let req_id = match c.send(method, params_fn(method, &file_uri)) {
+            Ok(id) => id,
+            Err(e) => return BenchResult::Fail { error: e, rss_kb },
+        };
+        match c.read_response(req_id, timeout) {
+            Ok(resp) => {
+                let ms = start.elapsed().as_secs_f64() * 1000.0;
+                let summary = response_summary(&resp, response_limit);
+                on_progress(&format!("[1/{}] baseline  {:.1}ms", total, ms));
+                iterations.push((ms, summary));
+            }
+            Err(e) => return BenchResult::Fail { error: e, rss_kb },
+        }
+    }
+
+    // Subsequent iterations: open each file, wait for diagnostics, re-request
+    for (si, step) in steps.iter().enumerate() {
+        let step_name = step
+            .path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        on_progress(&format!("[{}/{}] didOpen {}", si + 2, total, step_name));
+
+        // Open the additional file
+        if let Err(e) = c.open_file(&step.path) {
+            return BenchResult::Fail { error: e, rss_kb };
+        }
+
+        // Wait for diagnostics on the newly opened file
+        match c.wait_for_valid_diagnostics(index_timeout) {
+            Ok(_) => {}
+            Err(e) => {
+                return BenchResult::Fail {
+                    error: format!("wait_for_diagnostics after didOpen {}: {}", step_name, e),
+                    rss_kb,
+                };
+            }
+        }
+
+        // Re-send the benchmark request on the original file
+        let req_line = step.line.unwrap_or(base_line);
+        let req_col = step.col.unwrap_or(base_col);
+        let params = json!({
+            "textDocument": { "uri": &file_uri },
+            "position": { "line": req_line, "character": req_col },
+            "context": { "includeDeclaration": true },
+        });
+        let start = Instant::now();
+        let req_id = match c.send(method, params) {
+            Ok(id) => id,
+            Err(e) => return BenchResult::Fail { error: e, rss_kb },
+        };
+        match c.read_response(req_id, timeout) {
+            Ok(resp) => {
+                let ms = start.elapsed().as_secs_f64() * 1000.0;
+                let summary = response_summary(&resp, response_limit);
+                on_progress(&format!(
+                    "[{}/{}] {}  {:.1}ms",
+                    si + 2,
+                    total,
+                    step_name,
+                    ms
+                ));
+                iterations.push((ms, summary));
+            }
+            Err(e) => return BenchResult::Fail { error: e, rss_kb },
+        }
+    }
+    c.kill();
+    BenchResult::Ok { iterations, rss_kb }
+}
+
+/// Benchmark `textDocument/semanticTokens/full/delta`.
+///
+/// Flow:
+///   1. Spawn server, open file, wait for diagnostics
+///   2. Send `semanticTokens/full` to prime the cache and get a `resultId`
+///   3. Optionally send `didChange` snapshots to mutate the file
+///   4. For each iteration: send `semanticTokens/full/delta` with `previousResultId`,
+///      extract the new `resultId` from the response for the next iteration
+fn bench_lsp_delta(
+    srv: &ServerConfig,
+    root: &str,
+    cwd: &Path,
+    target_file: &Path,
+    snapshots: &[ResolvedSnapshot],
+    index_timeout: Duration,
+    timeout: Duration,
+    w: usize,
+    n: usize,
+    response_limit: usize,
+    on_progress: &dyn Fn(&str),
+) -> BenchResult {
+    on_progress("spawning");
+    let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd) {
+        Ok(c) => c,
+        Err(e) => {
+            return BenchResult::Fail {
+                error: e,
+                rss_kb: None,
+            }
+        }
+    };
+    if let Err(e) = c.initialize(root) {
+        let rss = get_rss(c.child.id());
+        return BenchResult::Fail {
+            error: e,
+            rss_kb: rss,
+        };
+    }
+    if let Err(e) = c.open_file(target_file) {
+        let rss = get_rss(c.child.id());
+        return BenchResult::Fail {
+            error: e,
+            rss_kb: rss,
+        };
+    }
+    on_progress("waiting for diagnostics");
+    match c.wait_for_valid_diagnostics(index_timeout) {
+        Ok(_) => {}
+        Err(e) => {
+            let rss = get_rss(c.child.id());
+            return BenchResult::Fail {
+                error: format!("wait_for_diagnostics: {}", e),
+                rss_kb: rss,
+            };
+        }
+    }
+    let rss_kb = get_rss(c.child.id());
+    let file_uri = uri(target_file);
+
+    // Step 2: Send semanticTokens/full to prime the cache
+    on_progress("priming semanticTokens/full");
+    let prime_params = json!({ "textDocument": { "uri": &file_uri } });
+    let prime_id = match c.send("textDocument/semanticTokens/full", prime_params) {
+        Ok(id) => id,
+        Err(e) => return BenchResult::Fail { error: e, rss_kb },
+    };
+    let prime_resp = match c.read_response(prime_id, timeout) {
+        Ok(r) => r,
+        Err(e) => {
+            return BenchResult::Fail {
+                error: format!("prime semanticTokens/full: {}", e),
+                rss_kb,
+            }
+        }
+    };
+    let mut result_id = prime_resp
+        .pointer("/result/resultId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0")
+        .to_string();
+
+    // Step 3: Send didChange snapshots if any
+    if !snapshots.is_empty() {
+        for (si, snap) in snapshots.iter().enumerate() {
+            let version = (si + 2) as i32;
+            match std::fs::read_to_string(&snap.path) {
+                Ok(content) => {
+                    if let Err(e) = c.did_change(&file_uri, version, &content) {
+                        return BenchResult::Fail { error: e, rss_kb };
+                    }
+                }
+                Err(e) => {
+                    return BenchResult::Fail {
+                        error: format!("{}: {}", snap.path.display(), e),
+                        rss_kb,
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 4: Iterate delta requests
+    let mut iterations = Vec::new();
+    for i in 0..(w + n) {
+        on_progress(&iter_msg(i, w, n));
+
+        let params = json!({
+            "textDocument": { "uri": &file_uri },
+            "previousResultId": &result_id,
+        });
+        let start = Instant::now();
+        let req_id = match c.send("textDocument/semanticTokens/full/delta", params) {
+            Ok(id) => id,
+            Err(e) => return BenchResult::Fail { error: e, rss_kb },
+        };
+        match c.read_response(req_id, timeout) {
+            Ok(resp) => {
+                let ms = start.elapsed().as_secs_f64() * 1000.0;
+                // Extract new resultId for next iteration (works for both full and delta responses)
+                if let Some(rid) = resp.pointer("/result/resultId").and_then(|v| v.as_str()) {
+                    result_id = rid.to_string();
+                }
+                on_progress(&format!("{}  {:.1}ms", iter_msg(i, w, n), ms));
+                if i >= w {
+                    let summary = response_summary(&resp, response_limit);
+                    iterations.push((ms, summary));
+                }
+            }
+            Err(e) => return BenchResult::Fail { error: e, rss_kb },
+        }
+    }
+    c.kill();
+    BenchResult::Ok { iterations, rss_kb }
+}
+
 /// Run a benchmark across all servers, showing a spinner per server.
 fn run_bench<F>(servers: &[&ServerConfig], response_limit: usize, f: F) -> Vec<BenchRow>
 where
@@ -1465,6 +1820,8 @@ const ALL_BENCHMARKS: &[&str] = &[
     "textDocument/codeLens",
     "textDocument/inlayHint",
     "textDocument/semanticTokens/full",
+    "textDocument/semanticTokens/range",
+    "textDocument/semanticTokens/full/delta",
     "textDocument/documentColor",
     "workspace/symbol",
 ];
@@ -1797,6 +2154,14 @@ fn main() {
             .unwrap_or((target_line, target_col))
     };
 
+    // Resolve start line/col for range-based requests, falling back to (0, 0).
+    let start_pos_for = |method: &str| -> (u32, u32) {
+        methods
+            .get(method)
+            .map(|m| (m.start_line.unwrap_or(0), m.start_col.unwrap_or(0)))
+            .unwrap_or((0, 0))
+    };
+
     // Position + method params for definition/declaration/hover/references
     let position_params = |method: &str, file_uri: &str| -> Value {
         let (l, c) = pos_for(method);
@@ -1872,6 +2237,17 @@ fn main() {
     let semantic_tokens_params =
         |_method: &str, file_uri: &str| -> Value { json!({ "textDocument": { "uri": file_uri } }) };
 
+    let semantic_tokens_range_params = |method: &str, file_uri: &str| -> Value {
+        let (sl, sc) = start_pos_for(method);
+        let (el, ec) = pos_for(method);
+        json!({
+            "textDocument": { "uri": file_uri },
+            "range": {
+                "start": { "line": sl, "character": sc },
+                "end": { "line": el, "character": ec },
+            },
+        })
+    };
     // (config_key, lsp_method, params_fn)
     // config_key and lsp_method are now the same — the official LSP method name
     // params_fn takes (method_name, file_uri) so it can resolve per-method overrides.
@@ -1959,6 +2335,11 @@ fn main() {
             &semantic_tokens_params,
         ),
         (
+            "textDocument/semanticTokens/range",
+            "textDocument/semanticTokens/range",
+            &semantic_tokens_range_params,
+        ),
+        (
             "textDocument/documentColor",
             "textDocument/documentColor",
             &doc_params,
@@ -2036,6 +2417,73 @@ fn main() {
         eprintln!("  {} {}", style("saved").dim(), style(&p).dim());
     }
 
+    // ── semanticTokens/full/delta (special-cased: needs result_id chaining) ──
+
+    if benchmarks.contains(&"textDocument/semanticTokens/full/delta") {
+        num += 1;
+        eprintln!(
+            "\n{}",
+            style(format!(
+                "[{}/{}] textDocument/semanticTokens/full/delta",
+                num, total
+            ))
+            .bold()
+        );
+        let snapshots: Vec<ResolvedSnapshot> = methods
+            .get("textDocument/semanticTokens/full/delta")
+            .map(|m| {
+                m.did_change
+                    .iter()
+                    .map(|s| ResolvedSnapshot {
+                        path: cwd.join(&s.file),
+                        line: s.line,
+                        col: s.col,
+                        expect: s.expect.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !snapshots.is_empty() {
+            eprintln!(
+                "  {} {} snapshot(s) via didChange",
+                style("edit").cyan(),
+                snapshots.len()
+            );
+        }
+        let rows = run_bench(&avail, response_limit, |srv, on_progress| {
+            bench_lsp_delta(
+                srv,
+                &root,
+                &cwd,
+                &bench_sol,
+                &snapshots,
+                index_timeout,
+                timeout,
+                w,
+                n,
+                response_limit,
+                on_progress,
+            )
+        });
+        all_results.push(("textDocument/semanticTokens/full/delta", None, rows));
+        let p = save_json(
+            &all_results,
+            &versions,
+            &avail,
+            n,
+            w,
+            &timeout,
+            &index_timeout,
+            &project,
+            bench_file_rel,
+            target_line,
+            target_col,
+            &methods,
+            &partial_dir,
+        );
+        eprintln!("  {} {}", style("saved").dim(), style(&p).dim());
+    }
+
     // ── all LSP method benchmarks ───────────────────────────────────────
 
     for (method, lsp_method, params_fn) in &method_benchmarks {
@@ -2059,6 +2507,20 @@ fn main() {
                         .collect()
                 })
                 .unwrap_or_default();
+            let did_open_steps: Vec<ResolvedDidOpen> = methods
+                .get(*method)
+                .map(|m| {
+                    m.did_open
+                        .iter()
+                        .map(|s| ResolvedDidOpen {
+                            path: cwd.join(&s.file),
+                            line: s.line,
+                            col: s.col,
+                            expect: s.expect.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             if !snapshots.is_empty() {
                 eprintln!(
                     "  {} {} snapshot(s) via didChange",
@@ -2066,7 +2528,40 @@ fn main() {
                     snapshots.len()
                 );
             }
-            let rows = if snapshots.is_empty() {
+            if !did_open_steps.is_empty() {
+                eprintln!(
+                    "  {} {} file(s) via didOpen",
+                    style("open").cyan(),
+                    did_open_steps.len()
+                );
+            }
+            let rows = if !did_open_steps.is_empty() {
+                let bl = methods
+                    .get(*method)
+                    .and_then(|m| m.line)
+                    .unwrap_or(target_line);
+                let bc = methods
+                    .get(*method)
+                    .and_then(|m| m.col)
+                    .unwrap_or(target_col);
+                run_bench(&avail, response_limit, |srv, on_progress| {
+                    bench_lsp_didopen(
+                        srv,
+                        &root,
+                        &cwd,
+                        &bench_sol,
+                        lsp_method,
+                        *params_fn,
+                        &did_open_steps,
+                        bl,
+                        bc,
+                        index_timeout,
+                        timeout,
+                        response_limit,
+                        on_progress,
+                    )
+                })
+            } else if snapshots.is_empty() {
                 run_bench(&avail, response_limit, |srv, on_progress| {
                     bench_lsp_method(
                         srv,
@@ -2107,7 +2602,68 @@ fn main() {
                     if row.kind != 0 {
                         continue; // skip failed/invalid servers
                     }
-                    if !snapshots.is_empty() {
+                    if !did_open_steps.is_empty() {
+                        // didOpen mode: iteration 0 = baseline, then 1 per didOpen step
+                        for (i, (_ms, resp)) in row.iterations.iter().enumerate() {
+                            if i == 0 {
+                                // Baseline — check method-level expect
+                                match method_expect {
+                                    Some(exp) => match check_expectation(resp, exp) {
+                                        Ok(()) => {
+                                            tally.passed += 1;
+                                            eprintln!(
+                                                "  {} [baseline] {}",
+                                                style("✓").green().bold(),
+                                                row.label,
+                                            );
+                                        }
+                                        Err(msg) => {
+                                            tally.failed += 1;
+                                            eprintln!(
+                                                "  {} [baseline] {} — {}",
+                                                style("✗").red().bold(),
+                                                row.label,
+                                                msg,
+                                            );
+                                        }
+                                    },
+                                    None => {
+                                        tally.skipped += 1;
+                                    }
+                                }
+                            } else if let Some(step) = did_open_steps.get(i - 1) {
+                                let step_name =
+                                    step.path.file_name().unwrap_or_default().to_string_lossy();
+                                let expect = step.expect.as_ref().or(method_expect);
+                                match expect {
+                                    Some(exp) => match check_expectation(resp, exp) {
+                                        Ok(()) => {
+                                            tally.passed += 1;
+                                            eprintln!(
+                                                "  {} [{}] {}",
+                                                style("✓").green().bold(),
+                                                i,
+                                                step_name,
+                                            );
+                                        }
+                                        Err(msg) => {
+                                            tally.failed += 1;
+                                            eprintln!(
+                                                "  {} [{}] {} — {}",
+                                                style("✗").red().bold(),
+                                                i,
+                                                step_name,
+                                                msg,
+                                            );
+                                        }
+                                    },
+                                    None => {
+                                        tally.skipped += 1;
+                                    }
+                                }
+                            }
+                        }
+                    } else if !snapshots.is_empty() {
                         // Snapshot mode: 1:1 mapping between iterations and snapshots
                         for (i, ((_ms, resp), snap)) in
                             row.iterations.iter().zip(snapshots.iter()).enumerate()
