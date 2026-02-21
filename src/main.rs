@@ -136,6 +136,11 @@ struct MethodConfig {
     /// the count should grow as the server discovers more cross-file references.
     #[serde(default, rename = "didOpen")]
     did_open: Vec<DidOpenStep>,
+    /// Cold-start mode: spawn a fresh server per iteration and measure the full
+    /// end-to-end time from didOpen through diagnostics through the method response.
+    /// This captures what the user actually feels — compilation + request latency.
+    #[serde(default)]
+    cold: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1109,6 +1114,106 @@ fn bench_diagnostics(
             }
             Err(e) => {
                 // Sample RSS even on timeout — server is still alive
+                let rss = get_rss(c.child.id());
+                return BenchResult::Fail {
+                    error: e,
+                    rss_kb: rss,
+                };
+            }
+        }
+        c.kill();
+    }
+    BenchResult::Ok {
+        iterations,
+        rss_kb: peak_rss,
+    }
+}
+
+/// Cold-start benchmark: spawns a fresh server per iteration, measures the full
+/// end-to-end time from didOpen through diagnostics through the method response.
+/// This captures the real user experience — compilation + request latency.
+fn bench_lsp_method_cold(
+    srv: &ServerConfig,
+    root: &str,
+    cwd: &Path,
+    target_file: &Path,
+    method: &str,
+    params_fn: &dyn Fn(&str, &str) -> Value,
+    timeout: Duration,
+    w: usize,
+    n: usize,
+    response_limit: usize,
+    on_progress: &dyn Fn(&str),
+) -> BenchResult {
+    let mut iterations = Vec::new();
+    let mut peak_rss: Option<u64> = None;
+    for i in 0..(w + n) {
+        on_progress(&format!("{}  cold start", iter_msg(i, w, n)));
+        let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd) {
+            Ok(c) => c,
+            Err(e) => {
+                return BenchResult::Fail {
+                    error: e,
+                    rss_kb: None,
+                }
+            }
+        };
+        if let Err(e) = c.initialize(root) {
+            return BenchResult::Fail {
+                error: e,
+                rss_kb: None,
+            };
+        }
+
+        let file_uri = uri(target_file);
+
+        // Start timing from didOpen — this is what the user feels
+        let start = Instant::now();
+        if let Err(e) = c.open_file(target_file) {
+            return BenchResult::Fail {
+                error: e,
+                rss_kb: None,
+            };
+        }
+
+        // Wait for diagnostics (compilation)
+        on_progress(&format!("{}  waiting for diagnostics", iter_msg(i, w, n)));
+        match c.wait_for_valid_diagnostics(timeout) {
+            Ok(_) => {}
+            Err(e) => {
+                let rss = get_rss(c.child.id());
+                return BenchResult::Fail {
+                    error: format!("wait_for_diagnostics: {}", e),
+                    rss_kb: rss,
+                };
+            }
+        }
+
+        // Send the actual method request
+        on_progress(&format!("{}  sending {}", iter_msg(i, w, n), method));
+        let req_id = match c.send(method, params_fn(method, &file_uri)) {
+            Ok(id) => id,
+            Err(e) => {
+                let rss = get_rss(c.child.id());
+                return BenchResult::Fail {
+                    error: e,
+                    rss_kb: rss,
+                };
+            }
+        };
+        match c.read_response(req_id, timeout) {
+            Ok(resp) => {
+                let ms = start.elapsed().as_secs_f64() * 1000.0;
+                if let Some(rss) = get_rss(c.child.id()) {
+                    peak_rss = Some(peak_rss.map_or(rss, |prev: u64| prev.max(rss)));
+                }
+                on_progress(&format!("{}  {:.1}ms", iter_msg(i, w, n), ms));
+                if i >= w {
+                    let summary = response_summary(&resp, response_limit);
+                    iterations.push((ms, summary));
+                }
+            }
+            Err(e) => {
                 let rss = get_rss(c.child.id());
                 return BenchResult::Fail {
                     error: e,
@@ -2535,7 +2640,30 @@ fn main() {
                     did_open_steps.len()
                 );
             }
-            let rows = if !did_open_steps.is_empty() {
+            let is_cold = methods.get(*method).map_or(false, |m| m.cold);
+            if is_cold {
+                eprintln!(
+                    "  {} fresh server per iteration (cold start)",
+                    style("cold").red()
+                );
+            }
+            let rows = if is_cold {
+                run_bench(&avail, response_limit, |srv, on_progress| {
+                    bench_lsp_method_cold(
+                        srv,
+                        &root,
+                        &cwd,
+                        &bench_sol,
+                        lsp_method,
+                        *params_fn,
+                        timeout,
+                        w,
+                        n,
+                        response_limit,
+                        on_progress,
+                    )
+                })
+            } else if !did_open_steps.is_empty() {
                 let bl = methods
                     .get(*method)
                     .and_then(|m| m.line)
