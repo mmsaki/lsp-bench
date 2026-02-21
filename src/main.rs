@@ -10,6 +10,180 @@ use std::process::{Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
+// ── Server Registry ─────────────────────────────────────────────────────────
+
+/// A version entry in the server registry. Overrides the parent server's fields.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct ServerVersion {
+    #[serde(default)]
+    cmd: Option<String>,
+    #[serde(default)]
+    args: Option<Vec<String>>,
+    #[serde(default)]
+    link: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    commit: Option<String>,
+    #[serde(default)]
+    repo: Option<String>,
+}
+
+/// A server definition in the registry, with optional named versions.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct ServerRegistryEntry {
+    cmd: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    link: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    commit: Option<String>,
+    #[serde(default)]
+    repo: Option<String>,
+    #[serde(default)]
+    versions: HashMap<String, ServerVersion>,
+}
+
+/// Server registry: name → definition. Loaded from servers.yaml.
+type ServerRegistry = HashMap<String, ServerRegistryEntry>;
+
+/// Load a server registry file. Returns empty map if file doesn't exist.
+fn load_server_registry(path: &Path) -> ServerRegistry {
+    match std::fs::read_to_string(path) {
+        Ok(content) => serde_yaml::from_str(&content).unwrap_or_else(|e| {
+            eprintln!(
+                "  {} parsing {}: {}",
+                style("warn").yellow(),
+                path.display(),
+                e
+            );
+            HashMap::new()
+        }),
+        Err(_) => HashMap::new(),
+    }
+}
+
+/// Resolve a server reference like "mmsaki" or "mmsaki@v0.1.20" into a ServerConfig.
+/// Falls back to treating the name as a cmd if not found in the registry.
+fn resolve_server(name: &str, registry: &ServerRegistry) -> ServerConfig {
+    let (base_name, version) = match name.split_once('@') {
+        Some((b, v)) => (b, Some(v)),
+        None => (name, None),
+    };
+
+    if let Some(entry) = registry.get(base_name) {
+        let label = match version {
+            Some(v) => format!("{} {}", base_name, v),
+            None => base_name.to_string(),
+        };
+
+        // Start with base entry values
+        let mut cmd = entry.cmd.clone();
+        let mut args = entry.args.clone();
+        let mut link = entry.link.clone();
+        let mut description = entry.description.clone();
+        let mut commit = entry.commit.clone();
+        let mut repo = entry.repo.clone();
+
+        // If a version is specified, override with version-specific values
+        if let Some(v) = version {
+            if let Some(ver) = entry.versions.get(v) {
+                if let Some(ref c) = ver.cmd {
+                    cmd = c.clone();
+                }
+                if let Some(ref a) = ver.args {
+                    args = a.clone();
+                }
+                if let Some(ref l) = ver.link {
+                    link = l.clone();
+                }
+                if let Some(ref d) = ver.description {
+                    description = d.clone();
+                }
+                if let Some(ref c) = ver.commit {
+                    commit = Some(c.clone());
+                }
+                if let Some(ref r) = ver.repo {
+                    repo = Some(r.clone());
+                }
+            } else {
+                eprintln!(
+                    "  {} version '{}' not found for server '{}', using base",
+                    style("warn").yellow(),
+                    v,
+                    base_name
+                );
+            }
+        }
+
+        ServerConfig {
+            label,
+            cmd,
+            args,
+            link,
+            description,
+            commit,
+            repo,
+        }
+    } else {
+        // Not in registry — treat the name as both label and cmd
+        ServerConfig {
+            label: name.to_string(),
+            cmd: name.to_string(),
+            args: Vec::new(),
+            link: String::new(),
+            description: String::new(),
+            commit: None,
+            repo: None,
+        }
+    }
+}
+
+/// Find a servers.yaml file by checking: explicit path, next to config, parent dirs.
+fn discover_servers_file(config_path: &str, explicit: Option<&str>) -> Option<PathBuf> {
+    // 1. Explicit path from config or CLI
+    if let Some(p) = explicit {
+        let path = Path::new(config_path)
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(p);
+        if path.exists() {
+            return Some(path);
+        }
+        // Also try as absolute/relative to cwd
+        let abs = Path::new(p);
+        if abs.exists() {
+            return Some(abs.to_path_buf());
+        }
+    }
+
+    // 2. Look next to the config file
+    if let Some(dir) = Path::new(config_path).parent() {
+        let candidate = dir.join("servers.yaml");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    // 3. Walk parent directories
+    let mut dir = Path::new(config_path)
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf());
+    while let Some(d) = dir {
+        let candidate = d.join("servers.yaml");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        dir = d.parent().map(|p| p.to_path_buf());
+    }
+
+    None
+}
+
 // ── Config ──────────────────────────────────────────────────────────────────
 
 /// Expected result for a goto-definition (or similar) response.
@@ -145,7 +319,9 @@ struct MethodConfig {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Config {
+    #[serde(default = "default_project")]
     project: String,
+    #[serde(default)]
     file: String,
     #[serde(default = "default_line")]
     line: u32,
@@ -181,10 +357,22 @@ struct Config {
     /// Per-method position and trigger overrides.
     #[serde(default)]
     methods: HashMap<String, MethodConfig>,
+    /// Servers to benchmark. Accepts inline definitions (objects with label/cmd)
+    /// or string references resolved against the server registry ("mmsaki",
+    /// "solc", "mmsaki@v0.1.20"). Defaults to ["mmsaki"] if omitted.
+    #[serde(default = "default_servers", deserialize_with = "deserialize_servers")]
     servers: Vec<ServerConfig>,
+    /// Path to a servers.yaml registry file. Auto-discovered next to the config
+    /// file if not specified.
+    #[serde(default, rename = "servers_file")]
+    servers_file: Option<String>,
+    /// Sub-configs to run sequentially. The parent's settings are merged as
+    /// defaults into each sub-config (sub-config values win).
+    #[serde(default)]
+    include: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ServerConfig {
     label: String,
     #[serde(default)]
@@ -202,6 +390,9 @@ struct ServerConfig {
     repo: Option<String>,
 }
 
+fn default_project() -> String {
+    ".".to_string()
+}
 fn default_line() -> u32 {
     102
 }
@@ -228,6 +419,68 @@ fn default_report_style() -> String {
 }
 fn default_response_limit() -> usize {
     80
+}
+fn default_servers() -> Vec<ServerConfig> {
+    vec![ServerConfig {
+        label: "mmsaki".to_string(),
+        cmd: "solidity-language-server".to_string(),
+        args: Vec::new(),
+        link: "https://github.com/mmsaki/solidity-language-server".to_string(),
+        description: String::new(),
+        commit: None,
+        repo: None,
+    }]
+}
+
+/// Deserialize `servers` field: accepts an array of objects (inline ServerConfig)
+/// or strings (registry references like "mmsaki", "solc", "mmsaki@v0.1.20").
+/// String entries are stored with label=string, cmd=string as placeholders —
+/// they get resolved against the server registry after loading.
+fn deserialize_servers<'de, D>(deserializer: D) -> Result<Vec<ServerConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let items: Vec<serde_yaml::Value> = serde::Deserialize::deserialize(deserializer)?;
+    let mut servers = Vec::new();
+    for item in items {
+        match &item {
+            serde_yaml::Value::String(name) => {
+                // String reference — placeholder, resolved later against registry
+                servers.push(ServerConfig {
+                    label: name.clone(),
+                    cmd: String::new(), // empty = needs registry resolution
+                    args: Vec::new(),
+                    link: String::new(),
+                    description: String::new(),
+                    commit: None,
+                    repo: None,
+                });
+            }
+            serde_yaml::Value::Mapping(_) => {
+                // Inline object — deserialize as ServerConfig directly
+                let cfg: ServerConfig =
+                    serde_yaml::from_value(item).map_err(serde::de::Error::custom)?;
+                servers.push(cfg);
+            }
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "servers entries must be strings or objects",
+                ));
+            }
+        }
+    }
+    Ok(servers)
+}
+
+/// Resolve string-reference servers against the registry.
+/// Servers with an empty `cmd` are looked up in the registry.
+/// Servers with a non-empty `cmd` (inline definitions) are left as-is.
+fn resolve_servers(servers: &mut Vec<ServerConfig>, registry: &ServerRegistry) {
+    for i in 0..servers.len() {
+        if servers[i].cmd.is_empty() {
+            servers[i] = resolve_server(&servers[i].label, registry);
+        }
+    }
 }
 
 /// Deserialize `response` field: accepts "full" or a number.
@@ -271,22 +524,46 @@ fn load_config(path: &str) -> Config {
     })
 }
 
-/// Check if a config file has an `include` key listing sub-configs to run.
-/// Returns Some(list of resolved sub-config paths) if found, None otherwise.
-fn check_include(path: &str) -> Option<Vec<String>> {
+/// Check if a config has `include` entries (either via raw YAML or parsed Config).
+/// Returns Some((resolved paths, parent defaults YAML)) if found, None otherwise.
+/// Parent defaults are all keys in the parent config except `include`.
+fn check_include(path: &str) -> Option<(Vec<String>, serde_yaml::Value)> {
     let content = std::fs::read_to_string(path).ok()?;
     let raw: serde_yaml::Value = serde_yaml::from_str(&content).ok()?;
     let items = raw.get("include")?.as_sequence()?;
-    let parent = Path::new(path).parent().unwrap_or(Path::new("."));
-    Some(
-        items
-            .iter()
-            .filter_map(|v| {
-                v.as_str()
-                    .map(|s| parent.join(s).to_string_lossy().to_string())
-            })
-            .collect(),
-    )
+    if items.is_empty() {
+        return None;
+    }
+    let parent_dir = Path::new(path).parent().unwrap_or(Path::new("."));
+    let paths: Vec<String> = items
+        .iter()
+        .filter_map(|v| {
+            v.as_str()
+                .map(|s| parent_dir.join(s).to_string_lossy().to_string())
+        })
+        .collect();
+    // Build defaults: everything in the parent except `include`
+    let mut defaults = raw.clone();
+    if let serde_yaml::Value::Mapping(ref mut m) = defaults {
+        m.remove(&serde_yaml::Value::String("include".to_string()));
+    }
+    Some((paths, defaults))
+}
+
+/// Merge parent defaults with a sub-config. Sub-config keys win.
+/// Only top-level keys are merged (no deep merge).
+fn merge_configs(defaults: &serde_yaml::Value, child_path: &str) -> Option<serde_yaml::Value> {
+    let content = std::fs::read_to_string(child_path).ok()?;
+    let child: serde_yaml::Value = serde_yaml::from_str(&content).ok()?;
+    let mut merged = defaults.clone();
+    if let (serde_yaml::Value::Mapping(ref mut base), serde_yaml::Value::Mapping(ref overrides)) =
+        (&mut merged, &child)
+    {
+        for (k, v) in overrides {
+            base.insert(k.clone(), v.clone());
+        }
+    }
+    Some(merged)
 }
 
 fn timestamp() -> String {
@@ -1988,6 +2265,10 @@ struct Cli {
     #[arg(short, long, default_value = "benchmark.yaml")]
     config: String,
 
+    /// Path to servers.yaml registry file (overrides auto-discovery)
+    #[arg(short, long)]
+    servers: Option<String>,
+
     /// Verify responses match `expect` fields in config. Exits non-zero on mismatch.
     #[arg(long)]
     verify: bool,
@@ -2184,13 +2465,16 @@ fn main() {
         None => {}
     }
 
-    // Check if this config includes sub-configs to run
-    if let Some(configs) = check_include(&cli.config) {
+    // Check if this config includes sub-configs to run.
+    // Parent defaults (everything except `include`) are merged into each
+    // sub-config: the sub-config's keys win over parent defaults.
+    if let Some((configs, defaults)) = check_include(&cli.config) {
         eprintln!(
             "{} running {} configs",
             style(">>").cyan().bold(),
             configs.len()
         );
+        let has_defaults = matches!(&defaults, serde_yaml::Value::Mapping(m) if !m.is_empty());
         let exe = std::env::current_exe().unwrap();
         let mut all_ok = true;
         for (i, cfg_path) in configs.iter().enumerate() {
@@ -2201,11 +2485,41 @@ fn main() {
                 configs.len(),
                 cfg_path
             );
-            let mut args = vec!["-c", cfg_path];
-            if cli.verify {
-                args.push("--verify");
+            // Merge parent defaults into the sub-config and write a temp file.
+            let tmp_path = format!("{}.merged.yaml", cfg_path);
+            let run_path: String = if has_defaults {
+                match merge_configs(&defaults, cfg_path) {
+                    Some(merged) => {
+                        let yaml = serde_yaml::to_string(&merged).unwrap();
+                        std::fs::write(&tmp_path, &yaml).unwrap();
+                        tmp_path.clone()
+                    }
+                    None => {
+                        eprintln!(
+                            "  {} could not merge defaults into {}",
+                            style("warn").yellow(),
+                            cfg_path
+                        );
+                        cfg_path.clone()
+                    }
+                }
+            } else {
+                cfg_path.clone()
+            };
+            let mut args = vec!["-c".to_string(), run_path.clone()];
+            // Forward --servers flag to sub-processes so they find the registry
+            if let Some(ref servers_path) = cli.servers {
+                args.push("--servers".to_string());
+                args.push(servers_path.clone());
             }
-            match std::process::Command::new(&exe).args(&args).status() {
+            if cli.verify {
+                args.push("--verify".to_string());
+            }
+            let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+            let result = std::process::Command::new(&exe).args(&arg_refs).status();
+            // Clean up temp file
+            let _ = std::fs::remove_file(&tmp_path);
+            match result {
                 Ok(s) if s.success() => {}
                 Ok(s) => {
                     eprintln!("  {} {} exited with {}", style("fail").red(), cfg_path, s);
@@ -2230,6 +2544,18 @@ fn main() {
 
     // Load config
     let mut cfg = load_config(&cli.config);
+
+    // Load server registry and resolve string references
+    let servers_file_hint = cfg.servers_file.clone().or(cli.servers.clone());
+    let registry_path = discover_servers_file(&cli.config, servers_file_hint.as_deref());
+    let registry = match &registry_path {
+        Some(p) => {
+            eprintln!("  {} {}", style("servers").dim(), p.display());
+            load_server_registry(p)
+        }
+        None => HashMap::new(),
+    };
+    resolve_servers(&mut cfg.servers, &registry);
     let verify = cli.verify;
 
     let n = cfg.iterations;
