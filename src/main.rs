@@ -360,7 +360,10 @@ struct Config {
     /// Servers to benchmark. Accepts inline definitions (objects with label/cmd)
     /// or string references resolved against the server registry ("mmsaki",
     /// "solc", "mmsaki@v0.1.20"). Defaults to ["mmsaki"] if omitted.
-    #[serde(default = "default_servers", deserialize_with = "deserialize_servers")]
+    #[serde(
+        default = "default_servers",
+        deserialize_with = "deserialize_servers_opt"
+    )]
     servers: Vec<ServerConfig>,
     /// Path to a servers.yaml registry file. Auto-discovered next to the config
     /// file if not specified.
@@ -434,16 +437,28 @@ fn default_servers() -> Vec<ServerConfig> {
 
 /// Deserialize `servers` field: accepts an array of objects (inline ServerConfig)
 /// or strings (registry references like "mmsaki", "solc", "mmsaki@v0.1.20").
-/// String entries are stored with label=string, cmd=string as placeholders —
+/// String entries are stored with label=string, cmd="" as placeholders —
 /// they get resolved against the server registry after loading.
-fn deserialize_servers<'de, D>(deserializer: D) -> Result<Vec<ServerConfig>, D::Error>
+/// Returns default servers if the field is missing or null.
+fn deserialize_servers_opt<'de, D>(deserializer: D) -> Result<Vec<ServerConfig>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let items: Vec<serde_yaml::Value> = serde::Deserialize::deserialize(deserializer)?;
+    let val: serde_yaml::Value = serde::Deserialize::deserialize(deserializer)?;
+    if val.is_null() {
+        return Ok(default_servers());
+    }
+    let items = match val.as_sequence() {
+        Some(s) => s,
+        None => {
+            return Err(serde::de::Error::custom(
+                "servers must be an array of strings or objects",
+            ))
+        }
+    };
     let mut servers = Vec::new();
     for item in items {
-        match &item {
+        match item {
             serde_yaml::Value::String(name) => {
                 // String reference — placeholder, resolved later against registry
                 servers.push(ServerConfig {
@@ -459,7 +474,7 @@ where
             serde_yaml::Value::Mapping(_) => {
                 // Inline object — deserialize as ServerConfig directly
                 let cfg: ServerConfig =
-                    serde_yaml::from_value(item).map_err(serde::de::Error::custom)?;
+                    serde_yaml::from_value(item.clone()).map_err(serde::de::Error::custom)?;
                 servers.push(cfg);
             }
             _ => {
