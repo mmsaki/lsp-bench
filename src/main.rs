@@ -271,6 +271,24 @@ fn load_config(path: &str) -> Config {
     })
 }
 
+/// Check if a config file has an `include` key listing sub-configs to run.
+/// Returns Some(list of resolved sub-config paths) if found, None otherwise.
+fn check_include(path: &str) -> Option<Vec<String>> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let raw: serde_yaml::Value = serde_yaml::from_str(&content).ok()?;
+    let items = raw.get("include")?.as_sequence()?;
+    let parent = Path::new(path).parent().unwrap_or(Path::new("."));
+    Some(
+        items
+            .iter()
+            .filter_map(|v| {
+                v.as_str()
+                    .map(|s| parent.join(s).to_string_lossy().to_string())
+            })
+            .collect(),
+    )
+}
+
 fn timestamp() -> String {
     let output = Command::new("date")
         .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
@@ -2164,6 +2182,50 @@ fn main() {
             std::process::exit(0);
         }
         None => {}
+    }
+
+    // Check if this config includes sub-configs to run
+    if let Some(configs) = check_include(&cli.config) {
+        eprintln!(
+            "{} running {} configs",
+            style(">>").cyan().bold(),
+            configs.len()
+        );
+        let exe = std::env::current_exe().unwrap();
+        let mut all_ok = true;
+        for (i, cfg_path) in configs.iter().enumerate() {
+            eprintln!(
+                "\n{} [{}/{}] {}",
+                style(">>").cyan().bold(),
+                i + 1,
+                configs.len(),
+                cfg_path
+            );
+            let mut args = vec!["-c", cfg_path];
+            if cli.verify {
+                args.push("--verify");
+            }
+            match std::process::Command::new(&exe).args(&args).status() {
+                Ok(s) if s.success() => {}
+                Ok(s) => {
+                    eprintln!("  {} {} exited with {}", style("fail").red(), cfg_path, s);
+                    all_ok = false;
+                }
+                Err(e) => {
+                    eprintln!("  {} {}: {}", style("error").red(), cfg_path, e);
+                    all_ok = false;
+                }
+            }
+        }
+        eprintln!(
+            "\n{} complete",
+            if all_ok {
+                style("done").green().bold()
+            } else {
+                style("done").yellow().bold()
+            }
+        );
+        std::process::exit(if all_ok { 0 } else { 1 });
     }
 
     // Load config
