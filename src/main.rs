@@ -166,7 +166,7 @@ struct Config {
     /// Output path for the generated report. Omit to skip report generation.
     #[serde(default)]
     report: Option<String>,
-    /// Report style: "delta" (default), "readme", or "analysis".
+    /// Report style (deprecated — only "competition" format is supported).
     #[serde(default = "default_report_style")]
     report_style: String,
     #[serde(
@@ -2185,7 +2185,7 @@ fn main() {
     });
     let output_dir = cfg.output;
     let report_path = cfg.report;
-    let report_style = cfg.report_style;
+    let _report_style = cfg.report_style;
     let response_limit = cfg.response_limit;
     let partial_dir = format!("{}/partial", output_dir);
 
@@ -2938,27 +2938,10 @@ fn main() {
         if let Some(ref report_out) = report_path {
             let exe = std::env::current_exe().unwrap();
             let bin_dir = exe.parent().unwrap();
-            let (bin_name, args): (&str, Vec<&str>) = match report_style.as_str() {
-                "readme" => ("gen-readme", vec!["--quiet", &path, report_out]),
-                "analysis" => ("gen-analysis", vec!["--quiet", &path, "-o", report_out]),
-                "delta" => ("gen-delta", vec!["--quiet", &path, "-o", report_out]),
-                "competition" => ("gen-competition", vec!["--quiet", &path, "-o", report_out]),
-                other => {
-                    eprintln!(
-                        "  {} unknown report_style '{}' (expected: delta, readme, analysis, competition)",
-                        style("warn").yellow(),
-                        other
-                    );
-                    return;
-                }
-            };
+            let bin_name = "gen-report";
+            let args: Vec<&str> = vec!["--quiet", "--session", &path, "-o", report_out];
             let bin = bin_dir.join(bin_name);
-            eprintln!(
-                "  {} {} -> {}",
-                style("report").dim(),
-                report_style,
-                report_out
-            );
+            eprintln!("  {} -> {}", style("report").dim(), report_out);
             match std::process::Command::new(&bin).args(&args).status() {
                 Ok(s) if s.success() => {}
                 Ok(s) => eprintln!(

@@ -4,17 +4,19 @@ use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Parser)]
-#[command(name = "gen-competition", version = env!("LONG_VERSION"))]
-#[command(
-    about = "Generate competition-style markdown report with correctness and response analysis"
-)]
+#[command(name = "gen-report", version = env!("LONG_VERSION"))]
+#[command(about = "Generate benchmark report with competition tables and session logs")]
 struct Cli {
     /// Path to benchmark JSON (default: latest in benchmarks/)
     input: Option<String>,
 
-    /// Output file path
+    /// Output file path for the competition report
     #[arg(short, long, default_value = "README.md")]
     output: String,
+
+    /// Also generate session logs (session.txt and session.md)
+    #[arg(long)]
+    session: bool,
 
     /// Don't print report to stdout
     #[arg(short, long)]
@@ -48,12 +50,28 @@ fn main() {
         std::process::exit(1);
     });
 
+    // Generate competition report (README.md)
     let md = generate_competition(&data, &json_path);
     std::fs::write(&output_path, &md).unwrap();
     if !quiet {
         println!("{}", md);
     }
     eprintln!("  -> {}", output_path);
+
+    // Generate session logs if requested
+    if cli.session {
+        let output_dir = Path::new(&output_path).parent().unwrap_or(Path::new("."));
+
+        let txt = generate_session_txt(&data);
+        let txt_path = output_dir.join("session.txt");
+        std::fs::write(&txt_path, &txt).unwrap();
+        eprintln!("  -> {}", txt_path.display());
+
+        let session_md = generate_session_md(&data);
+        let md_path = output_dir.join("session.md");
+        std::fs::write(&md_path, &session_md).unwrap();
+        eprintln!("  -> {}", md_path.display());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1099,4 +1117,240 @@ fn find_latest_json(dir: &str) -> Option<String> {
     entries
         .last()
         .map(|e| e.path().to_string_lossy().to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Session log generation — human-readable input/output per method
+// ---------------------------------------------------------------------------
+
+/// Generate a plain text session log showing input and output for each method.
+fn generate_session_txt(data: &Value) -> String {
+    let mut l: Vec<String> = Vec::new();
+
+    let settings = data.get("settings");
+    let file = settings
+        .and_then(|s| s.get("file"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let project = settings
+        .and_then(|s| s.get("project"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    l.push(format!("Solidity LSP Session — {} / {}", project, file));
+    l.push("=".repeat(60));
+    l.push(String::new());
+
+    let benchmarks = match data.get("benchmarks").and_then(|b| b.as_array()) {
+        Some(b) => b,
+        None => return l.join("\n"),
+    };
+
+    for bench in benchmarks {
+        let bench_name = bench.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+        let servers = match bench.get("servers").and_then(|s| s.as_array()) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        l.push(format!("── {} ──", bench_name));
+        l.push(String::new());
+
+        // Show the input request if available
+        if let Some(input) = bench.get("input").and_then(|v| v.as_str()) {
+            l.push(format!("→ INPUT"));
+            l.push(format!("  {}", input));
+            l.push(String::new());
+        } else {
+            // Reconstruct basic input info from settings
+            let line = settings
+                .and_then(|s| s.get("line"))
+                .and_then(|v| v.as_u64());
+            let col = settings.and_then(|s| s.get("col")).and_then(|v| v.as_u64());
+            if let (Some(line), Some(col)) = (line, col) {
+                l.push(format!("→ {} at {}:{}:{}", bench_name, file, line, col));
+            } else {
+                l.push(format!("→ {} on {}", bench_name, file));
+            }
+            l.push(String::new());
+        }
+
+        // Show each server's response
+        for srv in servers {
+            let name = srv.get("server").and_then(|v| v.as_str()).unwrap_or("?");
+            let status = srv.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            let p95 = srv.get("p95_ms").and_then(|v| v.as_f64());
+            let rss = srv
+                .get("rss_kb")
+                .and_then(|v| v.as_u64())
+                .filter(|&kb| kb > 0);
+
+            // Build the server header with metrics
+            let mut header = format!("← {}", name);
+            let mut metrics: Vec<String> = Vec::new();
+            if let Some(ms) = p95 {
+                metrics.push(format_latency(ms));
+            }
+            if let Some(kb) = rss {
+                metrics.push(format_memory(kb));
+            }
+            if !metrics.is_empty() {
+                header.push_str(&format!(" ({})", metrics.join(", ")));
+            }
+
+            match status {
+                "ok" => {
+                    let summary = human_result(bench_name, srv);
+                    l.push(header);
+                    l.push(format!("  {}", summary));
+
+                    // Show the raw response (pretty-printed, indented)
+                    let response = parse_response(srv);
+                    if !response.is_null() {
+                        let pretty = serde_json::to_string_pretty(&response).unwrap_or_default();
+                        for line in pretty.lines().take(20) {
+                            l.push(format!("  {}", line));
+                        }
+                        let total_lines = pretty.lines().count();
+                        if total_lines > 20 {
+                            l.push(format!("  ... ({} more lines)", total_lines - 20));
+                        }
+                    }
+                }
+                "invalid" => {
+                    let label = classify_error_result(srv);
+                    l.push(format!("{} — {}", header, label));
+                }
+                _ => {
+                    let label = classify_error_result(srv);
+                    l.push(format!("{} — {}", header, label));
+                }
+            }
+            l.push(String::new());
+        }
+
+        l.push(String::new());
+    }
+
+    l.join("\n")
+}
+
+/// Generate a markdown session log for GitHub rendering.
+fn generate_session_md(data: &Value) -> String {
+    let mut l: Vec<String> = Vec::new();
+
+    let settings = data.get("settings");
+    let file = settings
+        .and_then(|s| s.get("file"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let project = settings
+        .and_then(|s| s.get("project"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    l.push(format!("# Session Log — {} / {}", project, file));
+    l.push(String::new());
+
+    let benchmarks = match data.get("benchmarks").and_then(|b| b.as_array()) {
+        Some(b) => b,
+        None => return l.join("\n"),
+    };
+
+    for bench in benchmarks {
+        let bench_name = bench.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+        let servers = match bench.get("servers").and_then(|s| s.as_array()) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        l.push(format!("## {}", bench_name));
+        l.push(String::new());
+
+        // Show input
+        if let Some(input) = bench.get("input").and_then(|v| v.as_str()) {
+            l.push("**Request:**".into());
+            l.push("```json".into());
+            // Pretty-print the input JSON
+            if let Ok(parsed) = serde_json::from_str::<Value>(input) {
+                l.push(serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| input.to_string()));
+            } else {
+                l.push(input.to_string());
+            }
+            l.push("```".into());
+            l.push(String::new());
+        } else {
+            let line = settings
+                .and_then(|s| s.get("line"))
+                .and_then(|v| v.as_u64());
+            let col = settings.and_then(|s| s.get("col")).and_then(|v| v.as_u64());
+            if let (Some(line), Some(col)) = (line, col) {
+                l.push(format!(
+                    "**Request:** `{}` at `{}:{}:{}`",
+                    bench_name, file, line, col
+                ));
+            } else {
+                l.push(format!("**Request:** `{}` on `{}`", bench_name, file));
+            }
+            l.push(String::new());
+        }
+
+        // Show responses
+        l.push("**Responses:**".into());
+        l.push(String::new());
+
+        for srv in servers {
+            let name = srv.get("server").and_then(|v| v.as_str()).unwrap_or("?");
+            let status = srv.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            let p95 = srv.get("p95_ms").and_then(|v| v.as_f64());
+            let rss = srv
+                .get("rss_kb")
+                .and_then(|v| v.as_u64())
+                .filter(|&kb| kb > 0);
+
+            let mut metrics: Vec<String> = Vec::new();
+            if let Some(ms) = p95 {
+                metrics.push(format_latency(ms));
+            }
+            if let Some(kb) = rss {
+                metrics.push(format_memory(kb));
+            }
+            let metrics_str = if metrics.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", metrics.join(", "))
+            };
+
+            match status {
+                "ok" => {
+                    let summary = human_result(bench_name, srv);
+                    l.push(format!("**{}**{} — {}", name, metrics_str, summary));
+
+                    let response = parse_response(srv);
+                    if !response.is_null() {
+                        l.push(String::new());
+                        l.push("<details>".into());
+                        l.push("<summary>Raw response</summary>".into());
+                        l.push(String::new());
+                        l.push("```json".into());
+                        l.push(
+                            serde_json::to_string_pretty(&response).unwrap_or_else(|_| "?".into()),
+                        );
+                        l.push("```".into());
+                        l.push("</details>".into());
+                    }
+                }
+                _ => {
+                    let label = classify_error_result(srv);
+                    l.push(format!("**{}**{} — {}", name, metrics_str, label));
+                }
+            }
+            l.push(String::new());
+        }
+
+        l.push("---".into());
+        l.push(String::new());
+    }
+
+    l.join("\n")
 }

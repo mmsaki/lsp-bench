@@ -15,20 +15,8 @@ name = "lsp-bench"
 path = "src/main.rs"
 
 [[bin]]
-name = "gen-readme"
-path = "src/gen_readme.rs"
-
-[[bin]]
-name = "gen-analysis"
-path = "src/gen_analysis.rs"
-
-[[bin]]
-name = "gen-delta"
-path = "src/gen_delta.rs"
-
-[[bin]]
-name = "gen-competition"
-path = "src/gen_competition.rs"
+name = "gen-report"
+path = "src/gen_report.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
