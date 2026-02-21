@@ -1922,7 +1922,7 @@ fn save_json(
         "benchmarks": json_benchmarks,
     });
     let _ = std::fs::create_dir_all(dir);
-    let path = format!("{}/{}.json", dir, ts.replace(':', "-"));
+    let path = format!("{}/results.json", dir);
     let pretty = serde_json::to_string_pretty(&output).unwrap();
     std::fs::write(&path, &pretty).unwrap();
     path
