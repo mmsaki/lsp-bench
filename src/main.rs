@@ -2018,6 +2018,13 @@ fn bench_lsp_delta(
             }
         }
     };
+    if !is_valid_response(&prime_resp) {
+        c.kill();
+        return BenchResult::Invalid {
+            first_response: prime_resp,
+            rss_kb,
+        };
+    }
     let mut result_id = prime_resp
         .pointer("/result/resultId")
         .and_then(|v| v.as_str())
@@ -2060,6 +2067,13 @@ fn bench_lsp_delta(
         };
         match c.read_response(req_id, timeout) {
             Ok(resp) => {
+                if !is_valid_response(&resp) {
+                    c.kill();
+                    return BenchResult::Invalid {
+                        first_response: resp,
+                        rss_kb,
+                    };
+                }
                 let ms = start.elapsed().as_secs_f64() * 1000.0;
                 // Extract new resultId for next iteration (works for both full and delta responses)
                 if let Some(rid) = resp.pointer("/result/resultId").and_then(|v| v.as_str()) {

@@ -207,7 +207,7 @@ fn generate_competition(data: &Value, _json_path: &str) -> String {
                         Some(ms) if correct => {
                             let is_fastest = (ms - fastest_p95).abs() < 0.01;
                             if is_fastest {
-                                format!(" **{}** |", format_latency(ms))
+                                format!(" \u{26a1} {} |", format_latency(ms))
                             } else {
                                 format!(" {} |", format_latency(ms))
                             }
@@ -322,7 +322,7 @@ fn generate_competition(data: &Value, _json_path: &str) -> String {
                         Some(ms) => {
                             let formatted = format_latency(ms);
                             if (ms - best_p95).abs() < 0.01 {
-                                format!("**{}**", formatted)
+                                format!("\u{26a1} {}", formatted)
                             } else {
                                 formatted
                             }
