@@ -145,7 +145,7 @@ fn generate_competition(data: &Value, _json_path: &str) -> String {
             } else {
                 format!("[{}]({})", name, link)
             };
-            l.push(format!("| {} | `{}` |", name_cell, version));
+            l.push(format!("| {} | `{}` |", name_cell, short_version(version)));
         }
         l.push(String::new());
     }
@@ -169,7 +169,7 @@ fn generate_competition(data: &Value, _json_path: &str) -> String {
     l.push("## Summary".into());
     l.push(String::new());
 
-    // Header: | Method | server1 | server2 | ...
+    // Header: | Method | [server1](link) version | [server2](link) version | ...
     let mut header = "| Method |".to_string();
     let mut sep = "|--------|".to_string();
     for name in &server_names {
@@ -207,7 +207,7 @@ fn generate_competition(data: &Value, _json_path: &str) -> String {
                         Some(ms) if correct => {
                             let is_fastest = (ms - fastest_p95).abs() < 0.01;
                             if is_fastest {
-                                format!(" \u{26a1} {} |", format_latency(ms))
+                                format!(" {} \u{26a1} |", format_latency(ms))
                             } else {
                                 format!(" {} |", format_latency(ms))
                             }
@@ -303,9 +303,9 @@ fn generate_competition(data: &Value, _json_path: &str) -> String {
             .min()
             .unwrap_or(u64::MAX);
 
-        // Table: Server | p95 | RSS | Result | Responded
-        l.push("| Server | p95 | RSS | Result | Responded |".into());
-        l.push("|--------|-----|-----|--------|-----------|".into());
+        // Table: Server | p95 | RSS | Result
+        l.push("| Server | p95 | RSS | Result |".into());
+        l.push("|--------|-----|-----|--------|".into());
 
         for srv in servers {
             let name = srv.get("server").and_then(|v| v.as_str()).unwrap_or("?");
@@ -316,13 +316,13 @@ fn generate_competition(data: &Value, _json_path: &str) -> String {
                     let p95 = srv.get("p95_ms").and_then(|v| v.as_f64());
                     let rss = srv.get("rss_kb").and_then(|v| v.as_u64());
                     let result = human_result(bench_name, srv);
-                    let correct = check_correctness(bench_name, srv);
+                    let _correct = check_correctness(bench_name, srv);
 
                     let p95_str = match p95 {
                         Some(ms) => {
                             let formatted = format_latency(ms);
                             if (ms - best_p95).abs() < 0.01 {
-                                format!("\u{26a1} {}", formatted)
+                                format!("{} \u{26a1}", formatted)
                             } else {
                                 formatted
                             }
@@ -343,8 +343,8 @@ fn generate_competition(data: &Value, _json_path: &str) -> String {
                     };
 
                     l.push(format!(
-                        "| **{}** | {} | {} | {} | {} |",
-                        name, p95_str, rss_str, result, correct
+                        "| **{}** | {} | {} | {} |",
+                        name, p95_str, rss_str, result
                     ));
                 }
                 "invalid" => {
@@ -354,10 +354,7 @@ fn generate_competition(data: &Value, _json_path: &str) -> String {
                         .and_then(|v| v.as_u64())
                         .filter(|&kb| kb > 0);
                     let rss_str = rss.map(format_memory).unwrap_or_else(|| "-".into());
-                    l.push(format!(
-                        "| **{}** | - | {} | {} | \u{2717} |",
-                        name, rss_str, result
-                    ));
+                    l.push(format!("| **{}** | - | {} | {} |", name, rss_str, result));
                 }
                 _ => {
                     let result = classify_error_result(srv);
@@ -366,10 +363,7 @@ fn generate_competition(data: &Value, _json_path: &str) -> String {
                         .and_then(|v| v.as_u64())
                         .filter(|&kb| kb > 0);
                     let rss_str = rss.map(format_memory).unwrap_or_else(|| "-".into());
-                    l.push(format!(
-                        "| **{}** | - | {} | {} | \u{2717} |",
-                        name, rss_str, result
-                    ));
+                    l.push(format!("| **{}** | - | {} | {} |", name, rss_str, result));
                 }
             }
         }
@@ -1192,6 +1186,16 @@ fn classify_response(bench_name: &str, srv: &Value) -> (&'static str, bool) {
     }
 
     ("content", true)
+}
+
+/// Extract just the semver from a full version string.
+/// e.g. "solidity-language-server 0.1.24+commit.xxx" → "0.1.24"
+///      "0.8.26+commit.8a97fa7a.Darwin.appleclang" → "0.8.26"
+///      "@nomicfoundation/solidity-language-server 0.8.25" → "0.8.25"
+fn short_version(version: &str) -> &str {
+    // Take last whitespace-delimited token, then strip everything after '+'
+    let token = version.split_whitespace().last().unwrap_or(version);
+    token.split('+').next().unwrap_or(token)
 }
 
 /// Collect server names from the first benchmark entry.
