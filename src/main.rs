@@ -259,6 +259,35 @@ struct DidOpenStep {
     expect: Option<ExpectConfig>,
 }
 
+/// A rename step in a multi-rename sequence for workspace/willRenameFiles.
+///
+/// Each step renames a file and validates the result. The bench harness
+/// executes the full LSP lifecycle for each step:
+///   willRenameFiles → apply edits → rename on disk → didRenameFiles → wait for re-index
+///
+/// ```yaml
+/// renameSteps:
+///   - file: A.sol            # file to rename (relative to project root)
+///     newName: AA.sol         # new filename
+///     expect:
+///       count: 1              # expect 1 file with edits
+///   - file: AA.sol            # rename back
+///     newName: A.sol
+///     expect:
+///       count: 1
+/// ```
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct RenameStep {
+    /// File to rename (relative to project root).
+    file: String,
+    /// New filename (just the filename, not a path).
+    #[serde(rename = "newName")]
+    new_name: String,
+    /// Expected response (for --verify mode).
+    #[serde(default)]
+    expect: Option<ExpectConfig>,
+}
+
 /// Per-method configuration overrides.
 ///
 /// ```yaml
@@ -296,6 +325,11 @@ struct MethodConfig {
     /// New name for textDocument/rename (defaults to "__lsp_bench_rename__").
     #[serde(default, rename = "newName")]
     new_name: Option<String>,
+    /// Override the target file for this method. For workspace/willRenameFiles,
+    /// this sets the oldUri instead of using the top-level `file`. Path is
+    /// relative to the project root (e.g. "src/libraries/Pool.sol").
+    #[serde(default)]
+    file: Option<String>,
     /// Expected response for the base request (no didChange). Used by --verify.
     #[serde(default)]
     expect: Option<ExpectConfig>,
@@ -315,6 +349,12 @@ struct MethodConfig {
     /// This captures what the user actually feels — compilation + request latency.
     #[serde(default)]
     cold: bool,
+    /// Sequential rename steps for workspace/willRenameFiles. Each step is a
+    /// full rename lifecycle: willRenameFiles → apply edits on disk → didRenameFiles
+    /// → wait for re-index. This tests the real-world multi-rename scenario where
+    /// each rename mutates state and the next rename must work on the new state.
+    #[serde(default, rename = "renameSteps")]
+    rename_steps: Vec<RenameStep>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -679,7 +719,7 @@ fn reader_thread(
 }
 
 impl LspClient {
-    fn spawn(cmd: &str, args: &[String], cwd: &Path) -> Result<Self, String> {
+    fn spawn(cmd: &str, args: &[String], cwd: &Path, verbose: bool) -> Result<Self, String> {
         let abs_cmd = if cmd.starts_with("..") || cmd.starts_with("./") {
             std::fs::canonicalize(cmd)
                 .map(|p| p.to_string_lossy().to_string())
@@ -687,12 +727,17 @@ impl LspClient {
         } else {
             cmd.to_string()
         };
+        let stderr_cfg = if verbose {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        };
         let mut child = Command::new(&abs_cmd)
             .args(args)
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(stderr_cfg)
             .spawn()
             .map_err(|e| format!("{}: {}", cmd, e))?;
         let writer = child.stdin.take().unwrap();
@@ -948,10 +993,17 @@ impl Drop for LspClient {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn uri(p: &Path) -> String {
-    format!(
-        "file://{}",
-        std::fs::canonicalize(p).unwrap_or(p.into()).display()
-    )
+    // canonicalize resolves symlinks and produces an absolute path.
+    // If it fails (file doesn't exist yet, e.g. rename target), fall back
+    // to making the path absolute via current_dir + join.
+    let abs = std::fs::canonicalize(p).unwrap_or_else(|_| {
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            std::env::current_dir().unwrap_or_default().join(p)
+        }
+    });
+    format!("file://{}", abs.display())
 }
 
 fn available(cmd: &str) -> bool {
@@ -1439,12 +1491,13 @@ fn bench_spawn(
     w: usize,
     n: usize,
     on_progress: &dyn Fn(&str),
+    verbose: bool,
 ) -> BenchResult {
     let mut iterations = Vec::new();
     for i in 0..(w + n) {
         on_progress(&iter_msg(i, w, n));
         let start = Instant::now();
-        let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd) {
+        let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd, verbose) {
             Ok(c) => c,
             Err(e) => {
                 return BenchResult::Fail {
@@ -1483,12 +1536,13 @@ fn bench_diagnostics(
     n: usize,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    verbose: bool,
 ) -> BenchResult {
     let mut iterations = Vec::new();
     let mut peak_rss: Option<u64> = None;
     for i in 0..(w + n) {
         on_progress(&format!("{}  waiting for diagnostics", iter_msg(i, w, n)));
-        let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd) {
+        let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd, verbose) {
             Ok(c) => c,
             Err(e) => {
                 return BenchResult::Fail {
@@ -1555,12 +1609,13 @@ fn bench_lsp_method_cold(
     n: usize,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    verbose: bool,
 ) -> BenchResult {
     let mut iterations = Vec::new();
     let mut peak_rss: Option<u64> = None;
     for i in 0..(w + n) {
         on_progress(&format!("{}  cold start", iter_msg(i, w, n)));
-        let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd) {
+        let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd, verbose) {
             Ok(c) => c,
             Err(e) => {
                 return BenchResult::Fail {
@@ -1633,9 +1688,11 @@ fn bench_lsp_method_cold(
             }
         }
         // Print server logs for this iteration
-        if let Ok(logs) = c.logs.lock() {
-            for log in logs.iter() {
-                eprintln!("    {}", style(log).dim());
+        if verbose {
+            if let Ok(logs) = c.logs.lock() {
+                for log in logs.iter() {
+                    eprintln!("    {}", style(log).dim());
+                }
             }
         }
         c.kill();
@@ -1661,9 +1718,10 @@ fn bench_lsp_method(
     n: usize,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    verbose: bool,
 ) -> BenchResult {
     on_progress("spawning");
-    let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd) {
+    let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd, verbose) {
         Ok(c) => c,
         Err(e) => {
             return BenchResult::Fail {
@@ -1772,9 +1830,10 @@ fn bench_lsp_snapshots(
     timeout: Duration,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    verbose: bool,
 ) -> BenchResult {
     on_progress("spawning");
-    let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd) {
+    let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd, verbose) {
         Ok(c) => c,
         Err(e) => {
             return BenchResult::Fail {
@@ -1911,9 +1970,10 @@ fn bench_lsp_didopen(
     timeout: Duration,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    verbose: bool,
 ) -> BenchResult {
     on_progress("spawning");
-    let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd) {
+    let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd, verbose) {
         Ok(c) => c,
         Err(e) => {
             return BenchResult::Fail {
@@ -2030,6 +2090,374 @@ fn bench_lsp_didopen(
     BenchResult::Ok { iterations, rss_kb }
 }
 
+/// Benchmark `workspace/willRenameFiles` with a full multi-rename lifecycle.
+///
+/// Flow:
+///   1. Spawn server, open a file, wait for diagnostics + project index
+///   2. For each rename step:
+///      a. Send `workspace/willRenameFiles` — record the WorkspaceEdit response
+///      b. Apply the returned text edits to files on disk
+///      c. Rename the file on disk (oldUri → newUri)
+///      d. Send `workspace/didRenameFiles` notification
+///      e. Send `didChange` for each file that was edited (so server text_cache is updated)
+///      f. Wait for the server to re-index ($/progress end)
+///   3. After all steps, restore all files to their original state
+///
+/// Each step produces one iteration in the result, recording timing and the
+/// response (WorkspaceEdit). This tests the real-world scenario where a user
+/// renames files multiple times and each rename must work on the mutated state.
+fn bench_lsp_rename_sequence(
+    srv: &ServerConfig,
+    root: &str,
+    cwd: &Path,
+    target_file: &Path,
+    steps: &[RenameStep],
+    index_timeout: Duration,
+    timeout: Duration,
+    response_limit: usize,
+    on_progress: &dyn Fn(&str),
+    verbose: bool,
+) -> BenchResult {
+    on_progress("spawning");
+    let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd, verbose) {
+        Ok(c) => c,
+        Err(e) => {
+            return BenchResult::Fail {
+                error: e,
+                rss_kb: None,
+            }
+        }
+    };
+    if let Err(e) = c.initialize(root) {
+        let rss = get_rss(c.child.id());
+        return BenchResult::Fail {
+            error: e,
+            rss_kb: rss,
+        };
+    }
+    if let Err(e) = c.open_file(target_file) {
+        let rss = get_rss(c.child.id());
+        return BenchResult::Fail {
+            error: e,
+            rss_kb: rss,
+        };
+    }
+    on_progress("waiting for diagnostics");
+    if let Err(e) = c.wait_for_valid_diagnostics(index_timeout) {
+        let rss = get_rss(c.child.id());
+        return BenchResult::Fail {
+            error: format!("wait_for_diagnostics: {}", e),
+            rss_kb: rss,
+        };
+    }
+    on_progress("waiting for project index");
+    c.wait_for_progress_end(index_timeout);
+
+    let rss_kb = get_rss(c.child.id());
+    let total = steps.len();
+    let mut iterations = Vec::new();
+
+    // Track file renames so we can restore at the end.
+    // Each entry: (current_path, original_path, original_content).
+    let mut restore_list: Vec<(PathBuf, PathBuf, Vec<u8>)> = Vec::new();
+    // Track content changes to non-renamed files so we can restore them too.
+    // Key: absolute path, Value: original content.
+    let mut content_restore: HashMap<PathBuf, Vec<u8>> = HashMap::new();
+
+    // didChange version counter (per-file)
+    let mut versions: HashMap<String, i32> = HashMap::new();
+
+    for (si, step) in steps.iter().enumerate() {
+        let step_label = format!("{} → {}", step.file, step.new_name);
+        on_progress(&format!("[{}/{}] {}", si + 1, total, step_label));
+
+        let old_path = cwd.join(&step.file);
+        if !old_path.exists() {
+            // File might have been renamed in a previous step — check restore_list
+            let found = restore_list.iter().find(|(cur, _, _)| {
+                cur.file_name().map(|f| f.to_string_lossy().to_string())
+                    == old_path
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+            });
+            if found.is_none() {
+                return BenchResult::Fail {
+                    error: format!(
+                        "rename step {}: file not found: {}",
+                        si + 1,
+                        old_path.display()
+                    ),
+                    rss_kb,
+                };
+            }
+        }
+
+        let old_uri_str = uri(&old_path);
+        let new_path = old_path.parent().unwrap().join(&step.new_name);
+        let new_uri_str = uri(&new_path);
+
+        // Save original content for restore (only on first touch)
+        if !restore_list.iter().any(|(_, orig, _)| orig == &old_path) {
+            if let Ok(content) = std::fs::read(&old_path) {
+                restore_list.push((old_path.clone(), old_path.clone(), content));
+            }
+        }
+
+        // 1. Send workspace/willRenameFiles
+        let params = json!({
+            "files": [{
+                "oldUri": old_uri_str,
+                "newUri": new_uri_str,
+            }]
+        });
+        let start = Instant::now();
+        let req_id = match c.send("workspace/willRenameFiles", params) {
+            Ok(id) => id,
+            Err(e) => {
+                restore_files(&restore_list, &content_restore);
+                return BenchResult::Fail { error: e, rss_kb };
+            }
+        };
+        let resp = match c.read_response(req_id, timeout) {
+            Ok(r) => r,
+            Err(e) => {
+                restore_files(&restore_list, &content_restore);
+                return BenchResult::Fail { error: e, rss_kb };
+            }
+        };
+        let ms = start.elapsed().as_secs_f64() * 1000.0;
+        let summary = response_summary(&resp, response_limit);
+        on_progress(&format!(
+            "[{}/{}] {}  {:.1}ms",
+            si + 1,
+            total,
+            step_label,
+            ms
+        ));
+        iterations.push((ms, summary.clone()));
+
+        // Print server logs accumulated so far
+        if verbose {
+            if let Ok(logs) = c.logs.lock() {
+                for log in logs.iter() {
+                    eprintln!("  {} {}", style("log").dim(), log);
+                }
+            }
+        }
+
+        // Print the response for debugging
+        let edit_count = resp
+            .get("result")
+            .and_then(|r| r.get("changes"))
+            .and_then(|c| c.as_object())
+            .map(|m| m.len())
+            .unwrap_or(0);
+        if edit_count > 0 {
+            eprintln!("  {} {} file(s) with edits", style("→").green(), edit_count);
+        } else {
+            eprintln!("  {} no edits returned", style("→").yellow());
+        }
+
+        // 2. Apply the returned text edits to files on disk
+        let edits = resp
+            .get("result")
+            .and_then(|r| r.get("changes"))
+            .and_then(|c| c.as_object())
+            .cloned()
+            .unwrap_or_default();
+
+        for (file_uri, file_edits) in &edits {
+            let file_path = file_uri.strip_prefix("file://").unwrap_or(file_uri);
+            let file_path = PathBuf::from(file_path);
+
+            // Save original content for restore (only on first touch)
+            if !content_restore.contains_key(&file_path) {
+                if let Ok(orig) = std::fs::read(&file_path) {
+                    content_restore.insert(file_path.clone(), orig);
+                }
+            }
+
+            // Read current content
+            let mut content = match std::fs::read_to_string(&file_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!(
+                        "  {} failed to read {} for edit: {}",
+                        style("warn").yellow(),
+                        file_path.display(),
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            // Apply edits in reverse order (so byte offsets stay valid)
+            if let Some(edit_arr) = file_edits.as_array() {
+                let mut sorted_edits: Vec<&Value> = edit_arr.iter().collect();
+                sorted_edits.sort_by(|a, b| {
+                    let a_line = a
+                        .get("range")
+                        .and_then(|r| r.get("start"))
+                        .and_then(|s| s.get("line"))
+                        .and_then(|l| l.as_u64())
+                        .unwrap_or(0);
+                    let a_col = a
+                        .get("range")
+                        .and_then(|r| r.get("start"))
+                        .and_then(|s| s.get("character"))
+                        .and_then(|c| c.as_u64())
+                        .unwrap_or(0);
+                    let b_line = b
+                        .get("range")
+                        .and_then(|r| r.get("start"))
+                        .and_then(|s| s.get("line"))
+                        .and_then(|l| l.as_u64())
+                        .unwrap_or(0);
+                    let b_col = b
+                        .get("range")
+                        .and_then(|r| r.get("start"))
+                        .and_then(|s| s.get("character"))
+                        .and_then(|c| c.as_u64())
+                        .unwrap_or(0);
+                    (b_line, b_col).cmp(&(a_line, a_col))
+                });
+
+                for edit in sorted_edits {
+                    let new_text = edit.get("newText").and_then(|t| t.as_str()).unwrap_or("");
+                    let start_line = edit
+                        .get("range")
+                        .and_then(|r| r.get("start"))
+                        .and_then(|s| s.get("line"))
+                        .and_then(|l| l.as_u64())
+                        .unwrap_or(0) as usize;
+                    let start_col = edit
+                        .get("range")
+                        .and_then(|r| r.get("start"))
+                        .and_then(|s| s.get("character"))
+                        .and_then(|c| c.as_u64())
+                        .unwrap_or(0) as usize;
+                    let end_line = edit
+                        .get("range")
+                        .and_then(|r| r.get("end"))
+                        .and_then(|s| s.get("line"))
+                        .and_then(|l| l.as_u64())
+                        .unwrap_or(0) as usize;
+                    let end_col = edit
+                        .get("range")
+                        .and_then(|r| r.get("end"))
+                        .and_then(|s| s.get("character"))
+                        .and_then(|c| c.as_u64())
+                        .unwrap_or(0) as usize;
+
+                    // Convert line:col to byte offset
+                    let lines: Vec<&str> = content.lines().collect();
+                    let start_byte = lines[..start_line]
+                        .iter()
+                        .map(|l| l.len() + 1) // +1 for newline
+                        .sum::<usize>()
+                        + start_col;
+                    let end_byte =
+                        lines[..end_line].iter().map(|l| l.len() + 1).sum::<usize>() + end_col;
+
+                    content = format!(
+                        "{}{}{}",
+                        &content[..start_byte],
+                        new_text,
+                        &content[end_byte..]
+                    );
+                }
+            }
+
+            // Write the edited content back to disk
+            if let Err(e) = std::fs::write(&file_path, &content) {
+                eprintln!(
+                    "  {} failed to write {}: {}",
+                    style("warn").yellow(),
+                    file_path.display(),
+                    e
+                );
+            }
+
+            // Send didChange to the server so its text_cache is updated
+            let ver = versions.entry(file_uri.clone()).or_insert(1);
+            *ver += 1;
+            if let Err(e) = c.did_change(file_uri, *ver, &content) {
+                eprintln!(
+                    "  {} failed to send didChange for {}: {}",
+                    style("warn").yellow(),
+                    file_uri,
+                    e
+                );
+            }
+        }
+
+        // 3. Rename the file on disk
+        if old_path.exists() {
+            if let Err(e) = std::fs::rename(&old_path, &new_path) {
+                restore_files(&restore_list, &content_restore);
+                return BenchResult::Fail {
+                    error: format!("rename on disk failed: {}", e),
+                    rss_kb,
+                };
+            }
+            // Update restore_list to track the new current location
+            for entry in &mut restore_list {
+                if entry.0 == old_path {
+                    entry.0 = new_path.clone();
+                }
+            }
+        }
+
+        // 4. Send workspace/didRenameFiles notification
+        let did_rename_params = json!({
+            "files": [{
+                "oldUri": old_uri_str,
+                "newUri": new_uri_str,
+            }]
+        });
+        if let Err(e) = c.notif("workspace/didRenameFiles", did_rename_params) {
+            restore_files(&restore_list, &content_restore);
+            return BenchResult::Fail {
+                error: format!("didRenameFiles notification failed: {}", e),
+                rss_kb,
+            };
+        }
+
+        // 5. Wait for the server to re-index
+        on_progress(&format!(
+            "[{}/{}] {} — waiting for re-index",
+            si + 1,
+            total,
+            step_label
+        ));
+        c.wait_for_progress_end(index_timeout);
+    }
+
+    // Restore all files to original state
+    restore_files(&restore_list, &content_restore);
+
+    c.kill();
+    BenchResult::Ok { iterations, rss_kb }
+}
+
+/// Restore files to their original state after a rename sequence.
+fn restore_files(
+    rename_list: &[(PathBuf, PathBuf, Vec<u8>)],
+    content_map: &HashMap<PathBuf, Vec<u8>>,
+) {
+    // Restore renamed files: move back to original path and restore content
+    for (current_path, original_path, original_content) in rename_list {
+        if current_path != original_path && current_path.exists() {
+            let _ = std::fs::rename(current_path, original_path);
+        }
+        let _ = std::fs::write(original_path, original_content);
+    }
+    // Restore content changes to non-renamed files
+    for (path, content) in content_map {
+        let _ = std::fs::write(path, content);
+    }
+}
+
 /// Benchmark `textDocument/semanticTokens/full/delta`.
 ///
 /// Flow:
@@ -2050,9 +2478,10 @@ fn bench_lsp_delta(
     n: usize,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    verbose: bool,
 ) -> BenchResult {
     on_progress("spawning");
-    let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd) {
+    let mut c = match LspClient::spawn(&srv.cmd, &srv.args, cwd, verbose) {
         Ok(c) => c,
         Err(e) => {
             return BenchResult::Fail {
@@ -2396,6 +2825,10 @@ struct Cli {
     /// Verify responses match `expect` fields in config. Exits non-zero on mismatch.
     #[arg(long)]
     verify: bool,
+
+    /// Show server logs (window/logMessage and stderr). Off by default.
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 #[derive(Subcommand)]
@@ -2505,7 +2938,7 @@ fn replay(server: &str, input: &str, project: Option<&str>, file: Option<&str>, 
 
     // Spawn server
     eprintln!("{}", style("Spawning server...").dim());
-    let mut client = LspClient::spawn(cmd, &args, &cwd).unwrap_or_else(|e| {
+    let mut client = LspClient::spawn(cmd, &args, &cwd, true).unwrap_or_else(|e| {
         eprintln!("Error: failed to spawn server: {}", e);
         std::process::exit(1);
     });
@@ -2681,6 +3114,7 @@ fn main() {
     };
     resolve_servers(&mut cfg.servers, &registry);
     let verify = cli.verify;
+    let verbose = cli.verbose;
 
     let n = cfg.iterations;
     let w = cfg.warmup;
@@ -2914,19 +3348,24 @@ fn main() {
     let semantic_tokens_params =
         |_method: &str, file_uri: &str| -> Value { json!({ "textDocument": { "uri": file_uri } }) };
     let will_rename_params = |method: &str, file_uri: &str| -> Value {
-        let new_name = methods
-            .get(method)
+        let method_cfg = methods.get(method);
+        let new_name = method_cfg
             .and_then(|m| m.new_name.as_deref())
             .unwrap_or("__lsp_bench_renamed__.sol");
-        // Derive newUri from file_uri by replacing the filename
-        let new_uri = if let Some(pos) = file_uri.rfind('/') {
-            format!("{}/{}", &file_uri[..pos], new_name)
+        // Use per-method file override if set, otherwise use the top-level file.
+        let old_uri = match method_cfg.and_then(|m| m.file.as_deref()) {
+            Some(rel_path) => uri(&cwd.join(rel_path)),
+            None => file_uri.to_string(),
+        };
+        // Derive newUri by replacing the filename in oldUri
+        let new_uri = if let Some(pos) = old_uri.rfind('/') {
+            format!("{}/{}", &old_uri[..pos], new_name)
         } else {
             new_name.to_string()
         };
         json!({
             "files": [{
-                "oldUri": file_uri,
+                "oldUri": old_uri,
                 "newUri": new_uri,
             }]
         })
@@ -3061,7 +3500,7 @@ fn main() {
             style(format!("[{}/{}] initialize", num, total)).bold()
         );
         let rows = run_bench(&avail, response_limit, |srv, on_progress| {
-            bench_spawn(srv, &root, &cwd, w, n, on_progress)
+            bench_spawn(srv, &root, &cwd, w, n, on_progress, verbose)
         });
         all_results.push(("initialize", None, rows));
         let p = save_json(
@@ -3101,6 +3540,7 @@ fn main() {
                 n,
                 response_limit,
                 on_progress,
+                verbose,
             )
         });
         all_results.push(("textDocument/diagnostic", None, rows));
@@ -3168,6 +3608,7 @@ fn main() {
                 n,
                 response_limit,
                 on_progress,
+                verbose,
             )
         });
         all_results.push(("textDocument/semanticTokens/full/delta", None, rows));
@@ -3240,6 +3681,17 @@ fn main() {
                     did_open_steps.len()
                 );
             }
+            let rename_steps: Vec<RenameStep> = methods
+                .get(*method)
+                .map(|m| m.rename_steps.clone())
+                .unwrap_or_default();
+            if !rename_steps.is_empty() {
+                eprintln!(
+                    "  {} {} rename step(s) (full lifecycle)",
+                    style("rename").magenta(),
+                    rename_steps.len()
+                );
+            }
             let is_cold = methods.get(*method).map_or(false, |m| m.cold);
             if is_cold {
                 eprintln!(
@@ -3247,7 +3699,22 @@ fn main() {
                     style("cold").red()
                 );
             }
-            let rows = if is_cold {
+            let rows = if !rename_steps.is_empty() {
+                run_bench(&avail, response_limit, |srv, on_progress| {
+                    bench_lsp_rename_sequence(
+                        srv,
+                        &root,
+                        &cwd,
+                        &bench_sol,
+                        &rename_steps,
+                        index_timeout,
+                        timeout,
+                        response_limit,
+                        on_progress,
+                        verbose,
+                    )
+                })
+            } else if is_cold {
                 run_bench(&avail, response_limit, |srv, on_progress| {
                     bench_lsp_method_cold(
                         srv,
@@ -3261,6 +3728,7 @@ fn main() {
                         n,
                         response_limit,
                         on_progress,
+                        verbose,
                     )
                 })
             } else if !did_open_steps.is_empty() {
@@ -3287,6 +3755,7 @@ fn main() {
                         timeout,
                         response_limit,
                         on_progress,
+                        verbose,
                     )
                 })
             } else if snapshots.is_empty() {
@@ -3304,6 +3773,7 @@ fn main() {
                         n,
                         response_limit,
                         on_progress,
+                        verbose,
                     )
                 })
             } else {
@@ -3320,6 +3790,7 @@ fn main() {
                         timeout,
                         response_limit,
                         on_progress,
+                        verbose,
                     )
                 })
             };
