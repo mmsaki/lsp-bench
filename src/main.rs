@@ -481,6 +481,10 @@ struct Config {
     /// defaults into each sub-config (sub-config values win).
     #[serde(default)]
     include: Vec<String>,
+    /// Settings sent as `initializationOptions` in the LSP `initialize` request.
+    /// Mirrors the editor's `settings` block (e.g. lint.exclude, inlayHints).
+    #[serde(default, rename = "initializeSettings")]
+    initialize_settings: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -938,43 +942,44 @@ impl LspClient {
         }
     }
 
-    fn initialize(&mut self, root: &str) -> Result<(), String> {
-        let id = self.send(
-            "initialize",
-            json!({
-                "processId": std::process::id(),
-                "rootUri": root,
-                "capabilities": {
-                    "textDocument": {
-                        "publishDiagnostics": {},
-                        "definition": { "dynamicRegistration": false, "linkSupport": true },
-                        "declaration": { "dynamicRegistration": false, "linkSupport": true },
-                        "hover": { "dynamicRegistration": false, "contentFormat": ["plaintext", "markdown"] },
-                        "completion": {
-                            "dynamicRegistration": false,
-                            "completionItem": { "snippetSupport": false }
-                        },
-                        "documentSymbol": { "dynamicRegistration": false },
-                        "documentLink": { "dynamicRegistration": false },
-                        "references": { "dynamicRegistration": false },
-                        "rename": { "dynamicRegistration": false },
-                        "signatureHelp": { "dynamicRegistration": false },
-                        "codeAction": { "dynamicRegistration": false },
-                        "documentHighlight": { "dynamicRegistration": false },
-                        "selectionRange": { "dynamicRegistration": false },
+    fn initialize(&mut self, root: &str, init_settings: Option<&Value>) -> Result<(), String> {
+        let mut params = json!({
+            "processId": std::process::id(),
+            "rootUri": root,
+            "capabilities": {
+                "textDocument": {
+                    "publishDiagnostics": {},
+                    "definition": { "dynamicRegistration": false, "linkSupport": true },
+                    "declaration": { "dynamicRegistration": false, "linkSupport": true },
+                    "hover": { "dynamicRegistration": false, "contentFormat": ["plaintext", "markdown"] },
+                    "completion": {
+                        "dynamicRegistration": false,
+                        "completionItem": { "snippetSupport": false }
                     },
-                    "window": {
-                        "workDoneProgress": true
-                    },
-                    "workspace": {
-                        "symbol": { "dynamicRegistration": false },
-                        "fileOperations": {
-                            "willRename": true
-                        }
-                    }
+                    "documentSymbol": { "dynamicRegistration": false },
+                    "documentLink": { "dynamicRegistration": false },
+                    "references": { "dynamicRegistration": false },
+                    "rename": { "dynamicRegistration": false },
+                    "signatureHelp": { "dynamicRegistration": false },
+                    "codeAction": { "dynamicRegistration": false },
+                    "documentHighlight": { "dynamicRegistration": false },
+                    "selectionRange": { "dynamicRegistration": false },
                 },
-            }),
-        )?;
+                "window": {
+                    "workDoneProgress": true
+                },
+                "workspace": {
+                    "symbol": { "dynamicRegistration": false },
+                    "fileOperations": {
+                        "willRename": true
+                    }
+                }
+            },
+        });
+        if let Some(settings) = init_settings {
+            params["initializationOptions"] = settings.clone();
+        }
+        let id = self.send("initialize", params)?;
         self.read_response(id, Duration::from_secs(10))?;
         self.notif("initialized", json!({}))
     }
@@ -1701,6 +1706,7 @@ fn bench_spawn(
     w: usize,
     n: usize,
     on_progress: &dyn Fn(&str),
+    init_settings: Option<&Value>,
     verbose: bool,
 ) -> BenchResult {
     let mut iterations = Vec::new();
@@ -1717,7 +1723,7 @@ fn bench_spawn(
                 }
             }
         };
-        if let Err(e) = c.initialize(root) {
+        if let Err(e) = c.initialize(root, init_settings) {
             let rss = get_rss(c.child.id());
             return BenchResult::Fail {
                 error: e,
@@ -1751,6 +1757,7 @@ fn bench_diagnostics(
     n: usize,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    init_settings: Option<&Value>,
     verbose: bool,
 ) -> BenchResult {
     let mut iterations = Vec::new();
@@ -1766,7 +1773,7 @@ fn bench_diagnostics(
                 }
             }
         };
-        if let Err(e) = c.initialize(root) {
+        if let Err(e) = c.initialize(root, init_settings) {
             return BenchResult::Fail {
                 error: e,
                 rss_kb: None,
@@ -1824,6 +1831,7 @@ fn bench_lsp_method_cold(
     n: usize,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    init_settings: Option<&Value>,
     verbose: bool,
 ) -> BenchResult {
     let mut iterations = Vec::new();
@@ -1839,7 +1847,7 @@ fn bench_lsp_method_cold(
                 }
             }
         };
-        if let Err(e) = c.initialize(root) {
+        if let Err(e) = c.initialize(root, init_settings) {
             return BenchResult::Fail {
                 error: e,
                 rss_kb: None,
@@ -1933,6 +1941,7 @@ fn bench_lsp_method(
     n: usize,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    init_settings: Option<&Value>,
     verbose: bool,
 ) -> BenchResult {
     on_progress("spawning");
@@ -1945,7 +1954,7 @@ fn bench_lsp_method(
             }
         }
     };
-    if let Err(e) = c.initialize(root) {
+    if let Err(e) = c.initialize(root, init_settings) {
         let rss = get_rss(c.child.id());
         return BenchResult::Fail {
             error: e,
@@ -2045,6 +2054,7 @@ fn bench_lsp_snapshots(
     timeout: Duration,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    init_settings: Option<&Value>,
     verbose: bool,
 ) -> BenchResult {
     on_progress("spawning");
@@ -2057,7 +2067,7 @@ fn bench_lsp_snapshots(
             }
         }
     };
-    if let Err(e) = c.initialize(root) {
+    if let Err(e) = c.initialize(root, init_settings) {
         let rss = get_rss(c.child.id());
         return BenchResult::Fail {
             error: e,
@@ -2185,6 +2195,7 @@ fn bench_lsp_didopen(
     timeout: Duration,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    init_settings: Option<&Value>,
     verbose: bool,
 ) -> BenchResult {
     on_progress("spawning");
@@ -2197,7 +2208,7 @@ fn bench_lsp_didopen(
             }
         }
     };
-    if let Err(e) = c.initialize(root) {
+    if let Err(e) = c.initialize(root, init_settings) {
         let rss = get_rss(c.child.id());
         return BenchResult::Fail {
             error: e,
@@ -2331,6 +2342,7 @@ fn bench_lsp_rename_sequence(
     timeout: Duration,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    init_settings: Option<&Value>,
     verbose: bool,
 ) -> BenchResult {
     on_progress("spawning");
@@ -2343,7 +2355,7 @@ fn bench_lsp_rename_sequence(
             }
         }
     };
-    if let Err(e) = c.initialize(root) {
+    if let Err(e) = c.initialize(root, init_settings) {
         let rss = get_rss(c.child.id());
         return BenchResult::Fail {
             error: e,
@@ -2818,6 +2830,7 @@ fn bench_lsp_create_sequence(
     timeout: Duration,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    init_settings: Option<&Value>,
     verbose: bool,
 ) -> BenchResult {
     on_progress("spawning");
@@ -2830,7 +2843,7 @@ fn bench_lsp_create_sequence(
             }
         }
     };
-    if let Err(e) = c.initialize(root) {
+    if let Err(e) = c.initialize(root, init_settings) {
         let rss = get_rss(c.child.id());
         return BenchResult::Fail {
             error: e,
@@ -2943,6 +2956,7 @@ fn bench_lsp_delete_sequence(
     timeout: Duration,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    init_settings: Option<&Value>,
     verbose: bool,
 ) -> BenchResult {
     on_progress("spawning");
@@ -2955,7 +2969,7 @@ fn bench_lsp_delete_sequence(
             }
         }
     };
-    if let Err(e) = c.initialize(root) {
+    if let Err(e) = c.initialize(root, init_settings) {
         let rss = get_rss(c.child.id());
         return BenchResult::Fail {
             error: e,
@@ -3069,6 +3083,7 @@ fn bench_lsp_delta(
     n: usize,
     response_limit: usize,
     on_progress: &dyn Fn(&str),
+    init_settings: Option<&Value>,
     verbose: bool,
 ) -> BenchResult {
     on_progress("spawning");
@@ -3081,7 +3096,7 @@ fn bench_lsp_delta(
             }
         }
     };
-    if let Err(e) = c.initialize(root) {
+    if let Err(e) = c.initialize(root, init_settings) {
         let rss = get_rss(c.child.id());
         return BenchResult::Fail {
             error: e,
@@ -3538,7 +3553,7 @@ fn replay(server: &str, input: &str, project: Option<&str>, file: Option<&str>, 
 
     // Initialize
     eprintln!("{}", style("Initializing...").dim());
-    if let Err(e) = client.initialize(&root) {
+    if let Err(e) = client.initialize(&root, None) {
         eprintln!("Error: initialize failed: {}", e);
         std::process::exit(1);
     }
@@ -3726,6 +3741,7 @@ fn main() {
     let report_path = cfg.report;
     let _report_style = cfg.report_style;
     let response_limit = cfg.response_limit;
+    let init_settings = cfg.initialize_settings;
     let partial_dir = format!("{}/partial", output_dir);
 
     // Resolve which benchmarks to run from config
@@ -4133,7 +4149,16 @@ fn main() {
             style(format!("[{}/{}] initialize", num, total)).bold()
         );
         let rows = run_bench(&avail, response_limit, |srv, on_progress| {
-            bench_spawn(srv, &root, &cwd, w, n, on_progress, verbose)
+            bench_spawn(
+                srv,
+                &root,
+                &cwd,
+                w,
+                n,
+                on_progress,
+                init_settings.as_ref(),
+                verbose,
+            )
         });
         all_results.push(("initialize", None, rows));
         let p = save_json(
@@ -4173,6 +4198,7 @@ fn main() {
                 n,
                 response_limit,
                 on_progress,
+                init_settings.as_ref(),
                 verbose,
             )
         });
@@ -4241,6 +4267,7 @@ fn main() {
                 n,
                 response_limit,
                 on_progress,
+                init_settings.as_ref(),
                 verbose,
             )
         });
@@ -4366,6 +4393,7 @@ fn main() {
                         timeout,
                         response_limit,
                         on_progress,
+                        init_settings.as_ref(),
                         verbose,
                     )
                 })
@@ -4381,6 +4409,7 @@ fn main() {
                         timeout,
                         response_limit,
                         on_progress,
+                        init_settings.as_ref(),
                         verbose,
                     )
                 })
@@ -4396,6 +4425,7 @@ fn main() {
                         timeout,
                         response_limit,
                         on_progress,
+                        init_settings.as_ref(),
                         verbose,
                     )
                 })
@@ -4413,6 +4443,7 @@ fn main() {
                         n,
                         response_limit,
                         on_progress,
+                        init_settings.as_ref(),
                         verbose,
                     )
                 })
@@ -4440,6 +4471,7 @@ fn main() {
                         timeout,
                         response_limit,
                         on_progress,
+                        init_settings.as_ref(),
                         verbose,
                     )
                 })
@@ -4458,6 +4490,7 @@ fn main() {
                         n,
                         response_limit,
                         on_progress,
+                        init_settings.as_ref(),
                         verbose,
                     )
                 })
@@ -4475,6 +4508,7 @@ fn main() {
                         timeout,
                         response_limit,
                         on_progress,
+                        init_settings.as_ref(),
                         verbose,
                     )
                 })

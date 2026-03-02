@@ -57,7 +57,9 @@ readme:
 #
 # The expect field defines the expected response for --verify mode.
 # When running `lsp-bench --verify`, responses are checked against
-# expect.file (URI suffix match) and expect.line (0-based line number).
+# expect.file (URI suffix match), expect.line (0-based line number),
+# expect.count / expect.minCount (array size checks), and for completion:
+# expect.containsItems / expect.absentItems (item-level predicates).
 # Exits non-zero if any expectation fails.
 #
 # methods:
@@ -79,6 +81,21 @@ readme:
 #         expect:                # per-snapshot expect (overrides method-level)
 #           file: MyContract.sol
 #           line: 42
+
+# Settings sent as initializationOptions in the LSP initialize request.
+# Mirrors the editor's settings block. Useful for testing lint exclusions,
+# inlay hint toggles, project index modes, etc.
+#
+# initializeSettings:
+#   solidity-language-server:
+#     lint:
+#       enabled: true
+#       exclude: ["unwrapped-modifier-logic", "screaming-snake-case-const"]
+#     inlayHints:
+#       parameters: true
+#       gasEstimates: true
+#     projectIndex:
+#       fullProjectScan: true
 
 # Response output (default: 80)
 #   full     -> store full response, no truncation

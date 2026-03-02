@@ -118,6 +118,19 @@ $ lsp-bench --config goto.yaml --verify
 
 Exits non-zero on any mismatch. Per-snapshot `expect` overrides the method-level one.
 
+For completion benchmarks, `expect` also supports item-level predicates:
+
+- `containsItems`: items that must exist
+- `absentItems`: items that must not exist
+
+Each predicate can match on:
+
+- `label`
+- `detailContains`
+- `sortTextPrefix`
+- `hasAdditionalTextEdits`
+- `additionalTextEditsContain`
+
 ### Config Fields
 
 | Field | Default | Description |

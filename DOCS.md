@@ -368,8 +368,38 @@ On failure, the mismatch is reported and the process exits with code 1:
 | `line` | Expected 0-based line number. Checked against `range.start.line` (Location) or `targetRange.start.line` (LocationLink). |
 | `count` | Expected exact count. The response array length must equal this value. Useful for `textDocument/references`, `textDocument/documentSymbol`, etc. |
 | `minCount` | Expected minimum count. The response array length must be at least this value. Use when the exact count may vary but you want to assert a lower bound. |
+| `containsItems` | Completion-item predicates that must match at least one item in the completion response. |
+| `absentItems` | Completion-item predicates that must not match any item in the completion response. |
 
-All fields are optional — you can check any combination of file, line, count, and minCount.
+Completion item predicate fields:
+
+| Field | Description |
+|-------|-------------|
+| `label` | Completion item label must equal this string. |
+| `detailContains` | Completion item `detail` must contain this substring. |
+| `sortTextPrefix` | Completion item `sortText` must start with this prefix. |
+| `hasAdditionalTextEdits` | Whether the item must include `additionalTextEdits`. |
+| `additionalTextEditsContain` | At least one `additionalTextEdits[].newText` must contain this substring. |
+
+All fields are optional — combine as needed.
+
+Example (auto-import verification):
+
+```yaml
+methods:
+  textDocument/completion:
+    didChange:
+      - file: AutoImportBenchUsage.noimports.snapshot
+        line: 6
+        col: 12
+        expect:
+          containsItems:
+            - label: MyStruct
+              detailContains: AutoImportBenchSymbols.sol
+              sortTextPrefix: zz_autoimport_
+              hasAdditionalTextEdits: true
+              additionalTextEditsContain: 'import {MyStruct} from "./AutoImportBenchSymbols.sol";'
+```
 
 **Precedence:** Per-snapshot `expect` overrides the method-level `expect`. If neither is set, that snapshot/iteration is skipped (not counted as pass or fail).
 
