@@ -1383,7 +1383,15 @@ fn check_expectation(resp: &Value, expect: &ExpectConfig) -> Result<(), String> 
             .and_then(|r| r.get("start"))
             .and_then(|s| s.get("line"))
             .and_then(|l| l.as_u64())
-            .map(|l| l as u32);
+            .map(|l| l as u32)
+            // prepareRename commonly returns { start, end } directly
+            .or_else(|| {
+                location
+                    .get("start")
+                    .and_then(|s| s.get("line"))
+                    .and_then(|l| l.as_u64())
+                    .map(|l| l as u32)
+            });
         match actual_line {
             Some(line) if line == expected_line => {}
             Some(line) => {
@@ -2134,10 +2142,24 @@ fn bench_lsp_method(
             };
         }
     }
-    // For methods that depend on the background project index (e.g.
-    // willRenameFiles), wait for the $/progress end notification so the
-    // full project index is in the cache before we send requests.
-    if method.contains("willRename") || method.contains("willDelete") {
+    // For methods that depend on the background project index, wait for the
+    // $/progress end notification so the full project index is in the cache
+    // before we send requests.
+    let needs_index_ready = method.contains("willRename")
+        || method.contains("willDelete")
+        || method == "textDocument/definition"
+        || method == "textDocument/declaration"
+        || method == "textDocument/hover"
+        || method == "textDocument/references"
+        || method == "textDocument/completion"
+        || method == "textDocument/signatureHelp"
+        || method == "textDocument/rename"
+        || method == "textDocument/prepareRename"
+        || method == "textDocument/documentHighlight"
+        || method == "textDocument/inlayHint"
+        || method == "textDocument/documentLink"
+        || method == "workspace/symbol";
+    if needs_index_ready {
         on_progress("waiting for project index");
         c.wait_for_progress_end(index_timeout);
     }
